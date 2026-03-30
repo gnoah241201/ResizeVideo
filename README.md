@@ -94,7 +94,7 @@ Response:
 {
   "ok": true,
   "port": 3001,
-  "maxConcurrentJobs": 2,
+  "maxConcurrentJobs": 5,
   "encoder": "libx264"
 }
 ```
@@ -107,11 +107,11 @@ The `MAX_CONCURRENT_JOBS` setting controls how many videos can render simultaneo
 
 | Machine | Recommended Value | Notes |
 |---------|------------------|-------|
-| Low-end / limited RAM | 1 | Prevents memory pressure |
-| Development / normal laptop | 2 | Default, balanced |
-| Powerful workstation | 3-4 | If you need faster batch processing |
+| Low-end / limited RAM | 1-2 | Prevents memory pressure |
+| Development / normal laptop | 5 | Default, balanced |
+| Powerful workstation | 6+ | For faster batch processing |
 
-**Note**: Each render job uses significant CPU and memory. Increasing concurrency beyond your machine's capacity will cause jobs to fail or the system to become unresponsive.
+**Note**: Each render job uses significant CPU and memory. Increasing concurrency beyond your machine's capacity will cause jobs to fail or the system to become unresponsive. You can override the default by setting `MAX_CONCURRENT_JOBS` environment variable.
 
 ## Encoder Mode (CPU vs NVIDIA NVENC)
 
