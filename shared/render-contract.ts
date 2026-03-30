@@ -25,6 +25,7 @@ export interface NamingMeta {
 export interface RenderSpec {
   inputRatio: InputRatio;
   outputRatio: AspectRatio;
+  /** Duration in seconds. Undefined means full video length. */
   duration?: number;
   fgPosition: ForegroundPosition;
   bgType: BackgroundType;

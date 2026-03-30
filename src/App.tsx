@@ -1,18 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Film, Type, Move, Download, X, RefreshCw } from 'lucide-react';
+import { Upload, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Film, Type, Move, Download, X, RefreshCw, RotateCcw } from 'lucide-react';
 import { NamingMeta, parseVideoNamingMeta, buildOutputFilename } from './naming';
 import { RenderSpec } from '../shared/render-contract';
 import { buildRenderSpec } from './render/renderSpec';
 import { createOverlayPng } from './render/overlay';
 import { cancelRenderJob, createRenderJob, downloadRenderJob, getRenderJob } from './render/api';
+import { deriveOutputs, OutputConfig } from './render/outputDerivation';
+import { getJobDisplayName } from './render/jobDisplay';
+import {
+  DEFAULT_LOGO_SIZE,
+  DEFAULT_LOGO_X,
+  DEFAULT_LOGO_Y,
+  DEFAULT_BUTTON_TYPE,
+  DEFAULT_BUTTON_TEXT,
+  DEFAULT_BUTTON_SIZE,
+  DEFAULT_BUTTON_X,
+  DEFAULT_BUTTON_Y,
+} from './render/overlayDefaults';
+import { createDefaultButtonState, createDefaultLogoState } from './render/resetState';
 
-
-type OutputConfig = {
-  id: string;
-  ratio: '9:16' | '16:9' | '4:5' | '1:1';
-  duration?: 6 | 15;
-  label: string;
-};
 
 type RenderJob = {
   id: string;
@@ -40,27 +46,6 @@ type RenderJob = {
   };
   // Track download availability from backend
   downloadUrl?: string;
-};
-
-
-const getOutputs = (inputRatio: '16:9' | '9:16'): OutputConfig[] => {
-  if (inputRatio === '16:9') {
-    return [
-      { id: '9:16', ratio: '9:16', label: 'Output: 9:16' },
-      { id: '16:9-6s', ratio: '16:9', duration: 6, label: 'Output: 16:9 (6s cut)' },
-      { id: '16:9-15s', ratio: '16:9', duration: 15, label: 'Output: 16:9 (15s cut)' },
-      { id: '4:5', ratio: '4:5', label: 'Output: 4:5' },
-      { id: '1:1', ratio: '1:1', label: 'Output: 1:1' },
-    ];
-  } else {
-    return [
-      { id: '9:16-6s', ratio: '9:16', duration: 6, label: 'Output: 9:16 (6s cut)' },
-      { id: '9:16-15s', ratio: '9:16', duration: 15, label: 'Output: 9:16 (15s cut)' },
-      { id: '16:9', ratio: '16:9', label: 'Output: 16:9' },
-      { id: '4:5', ratio: '4:5', label: 'Output: 4:5' },
-      { id: '1:1', ratio: '1:1', label: 'Output: 1:1' },
-    ];
-  }
 };
 
 function PreviewBox({
@@ -305,7 +290,7 @@ function PreviewBox({
                         {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
                           <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
                             {buttonType === 'text' ? (
-                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-sm md:text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
                                 {buttonText}
                               </div>
                             ) : (
@@ -336,7 +321,7 @@ function PreviewBox({
                         {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
                           <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
                             {buttonType === 'text' ? (
-                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-sm md:text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
                                 {buttonText}
                               </div>
                             ) : (
@@ -367,7 +352,7 @@ function PreviewBox({
                         {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
                           <div className="flex justify-center items-center w-full h-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
                             {buttonType === 'text' ? (
-                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-sm md:text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
                                 {buttonText}
                               </div>
                             ) : (
@@ -410,16 +395,16 @@ export default function App() {
 
   const [logo, setLogo] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoSize, setLogoSize] = useState(100);
-  const [buttonType, setButtonType] = useState<'text' | 'image'>('text');
-  const [buttonText, setButtonText] = useState('Play Now');
+  const [logoSize, setLogoSize] = useState(DEFAULT_LOGO_SIZE);
+  const [logoX, setLogoX] = useState(DEFAULT_LOGO_X);
+  const [logoY, setLogoY] = useState(DEFAULT_LOGO_Y);
+  const [buttonType, setButtonType] = useState<'text' | 'image'>(DEFAULT_BUTTON_TYPE);
+  const [buttonText, setButtonText] = useState(DEFAULT_BUTTON_TEXT);
   const [buttonImage, setButtonImage] = useState<string | null>(null);
   const [buttonImageFile, setButtonImageFile] = useState<File | null>(null);
-  const [buttonSize, setButtonSize] = useState(100);
-  const [buttonX, setButtonX] = useState(0);
-  const [buttonY, setButtonY] = useState(0);
-  const [logoX, setLogoX] = useState(0);
-  const [logoY, setLogoY] = useState(0);
+  const [buttonSize, setButtonSize] = useState(DEFAULT_BUTTON_SIZE);
+  const [buttonX, setButtonX] = useState(DEFAULT_BUTTON_X);
+  const [buttonY, setButtonY] = useState(DEFAULT_BUTTON_Y);
   const [inputRatio, setInputRatio] = useState<'16:9' | '9:16'>('16:9');
   const [fgPosition, setFgPosition] = useState<'left' | 'center' | 'right'>('right');
   // Naming metadata
@@ -438,7 +423,7 @@ export default function App() {
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [selectedDownloads, setSelectedDownloads] = useState<string[]>([]);
 
-  const outputs = getOutputs(inputRatio);
+  const outputs = deriveOutputs(inputRatio, fgDuration);
 
   const handleOpenDownloadModal = () => {
     setSelectedDownloads(outputs.map(o => o.id));
@@ -554,15 +539,17 @@ export default function App() {
           setJobs((prev) => prev.map((item) =>
             item.id === job.id
               ? {
-                ...item,
-                status: state.status,
-                progress: state.progress,
-                progressMode: state.progressMode,
-                error: state.error,
-                downloadUrl: state.downloadUrl, // Track download availability
-                lastPollError: undefined, // Clear error on successful poll
-                lastActionError: undefined, // Clear action errors on status update
-              }
+                  ...item,
+                  status: state.status,
+                  progress: state.progress,
+                  progressMode: state.progressMode,
+                  error: state.error,
+                  downloadUrl: state.downloadUrl, // Track download availability
+                  // Capture outputFilename from backend as fallback/verification
+                  filename: state.outputFilename || item.filename,
+                  lastPollError: undefined, // Clear error on successful poll
+                  lastActionError: undefined, // Clear action errors on status update
+                }
               : item,
           ));
         } catch (error) {
@@ -767,7 +754,7 @@ export default function App() {
       try {
         await downloadResult(job);
       } catch (err) {
-        failed.push(job.label);
+        failed.push(getJobDisplayName(job));
       }
     }
     
@@ -853,6 +840,28 @@ export default function App() {
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
+  };
+
+  // Reset handlers for logo and button
+  // Both handlers perform full reset: transform + asset
+  const handleResetLogo = () => {
+    const next = createDefaultLogoState();
+    setLogo(next.image);
+    setLogoFile(next.imageFile);
+    setLogoSize(next.size);
+    setLogoX(next.x);
+    setLogoY(next.y);
+  };
+
+  const handleResetButton = () => {
+    const next = createDefaultButtonState();
+    setButtonType(next.type);
+    setButtonText(next.text);
+    setButtonSize(next.size);
+    setButtonX(next.x);
+    setButtonY(next.y);
+    setButtonImage(next.image);
+    setButtonImageFile(next.imageFile);
   };
 
   return (
@@ -1126,6 +1135,13 @@ export default function App() {
                 </div>
                 <input type="range" min="-500" max="500" value={logoY} onChange={(e) => setLogoY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
               </div>
+              <button
+                onClick={handleResetLogo}
+                className="w-full mt-2 py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-500/30"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Logo
+              </button>
             </div>
           </div>
 
@@ -1203,6 +1219,13 @@ export default function App() {
                 </div>
                 <input type="range" min="-500" max="500" value={buttonY} onChange={(e) => setButtonY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
               </div>
+              <button
+                onClick={handleResetButton}
+                className="w-full mt-2 py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors border border-amber-500/30"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Button
+              </button>
             </div>
           </div>
         </div>
@@ -1319,7 +1342,7 @@ export default function App() {
                 <div key={job.id} className="bg-neutral-800/40 border border-neutral-700/80 rounded-xl p-4 flex flex-col gap-3 group relative overflow-hidden transition-all">
                   <div className="flex items-start justify-between relative z-10">
                     <div className="pr-12">
-                      <h4 className="text-sm font-medium text-white line-clamp-1">{job.label}</h4>
+                      <h4 className="text-sm font-medium text-white line-clamp-1">{getJobDisplayName(job)}</h4>
                       <p className={`text-xs mt-0.5 font-medium ${job.status === 'processing' ? 'text-blue-400 animate-pulse' : job.status === 'completed' ? 'text-green-400' : job.status === 'failed' ? 'text-red-400' : 'text-neutral-400 capitalize'}`}>
                         {job.status === 'processing' && job.progressMode === 'indeterminate' ? 'Processing...' : job.status}
                       </p>
