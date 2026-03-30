@@ -40,6 +40,12 @@ const isCancelling = (job: RenderJobRecord) => {
  */
 const RESTART_ERROR_MESSAGE = 'Interrupted by server restart';
 
+type QueueDeps = {
+  tempRoot?: string;
+  runRenderJob?: typeof runRenderJob;
+  determineProgressMode?: typeof determineProgressMode;
+};
+
 export class JobQueueService {
   private readonly jobs = new Map<string, RenderJobRecord>();
   private readonly pending: string[] = [];
@@ -48,10 +54,14 @@ export class JobQueueService {
   private cleanupInterval: NodeJS.Timeout | null = null;
   private readonly jobStore: JobStore;
   private readonly tempRoot: string;
+  private readonly runRenderJobImpl: typeof runRenderJob;
+  private readonly determineProgressModeImpl: typeof determineProgressMode;
 
-  constructor(private readonly maxConcurrentJobs: number) {
-    this.tempRoot = path.resolve(process.cwd(), 'temp_superpowers', 'native-renders');
+  constructor(private readonly maxConcurrentJobs: number, deps: QueueDeps = {}) {
+    this.tempRoot = deps.tempRoot ?? path.resolve(process.cwd(), 'temp_superpowers', 'native-renders');
     this.jobStore = new JobStore(this.tempRoot);
+    this.runRenderJobImpl = deps.runRenderJob ?? runRenderJob;
+    this.determineProgressModeImpl = deps.determineProgressMode ?? determineProgressMode;
   }
 
   async init() {
@@ -336,7 +346,7 @@ export class JobQueueService {
     
     // CRITICAL: Set progressMode IMMEDIATELY when entering processing state
     // This prevents the ambiguous window where frontend sees progressMode: undefined
-    const progressMode = await determineProgressMode(job);
+    const progressMode = await this.determineProgressModeImpl(job);
     job.progressMode = progressMode;
     
     // For indeterminate jobs, set progress to -1 immediately to signal "processing but unknown"
@@ -347,7 +357,7 @@ export class JobQueueService {
     let wasCancelling = false;
 
     try {
-      const { child, completion } = runRenderJob(job, (renderProgress: RenderProgress) => {
+      const { child, completion } = this.runRenderJobImpl(job, (renderProgress: RenderProgress) => {
         if (!wasCancelling) {
           job.progress = renderProgress.progress;
           // Only update mode if it's still indeterminate (to avoid overwriting determinate)
