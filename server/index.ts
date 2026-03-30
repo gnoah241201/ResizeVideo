@@ -11,7 +11,7 @@ const PORT_ENV = process.env.PORT;
 const MAX_JOBS_ENV = process.env.MAX_CONCURRENT_JOBS;
 
 const port = PORT_ENV ? Number(PORT_ENV) : 3001;
-const maxConcurrentJobs = MAX_JOBS_ENV ? Number(MAX_JOBS_ENV) : 2;
+const maxConcurrentJobs = MAX_JOBS_ENV ? Number(MAX_JOBS_ENV) : 5;
 
 // Startup validation
 if (PORT_ENV && isNaN(port)) {
