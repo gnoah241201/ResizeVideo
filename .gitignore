@@ -1,8 +1,16 @@
 node_modules/
 build/
 dist/
+dist-electron/
+binaries/
+vendor/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+.agents/
+.sisyphus/
+.vscode/
+temp_superpowers/
+nul
