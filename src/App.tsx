@@ -1,31 +1,52 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Film, Type, Move, Download, X } from 'lucide-react';
+import { Upload, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Film, Type, Move, Download, X, RefreshCw, RotateCcw } from 'lucide-react';
+import { NamingMeta, parseVideoNamingMeta, buildOutputFilename } from './naming';
+import { RenderSpec } from '../shared/render-contract';
+import { buildRenderSpec } from './render/renderSpec';
+import { createOverlayPng } from './render/overlay';
+import { cancelRenderJob, createRenderJob, downloadRenderJob, getRenderJob } from './render/api';
+import { deriveOutputs, OutputConfig } from './render/outputDerivation';
+import { getJobDisplayName } from './render/jobDisplay';
+import {
+  DEFAULT_LOGO_SIZE,
+  DEFAULT_LOGO_X,
+  DEFAULT_LOGO_Y,
+  DEFAULT_BUTTON_TYPE,
+  DEFAULT_BUTTON_TEXT,
+  DEFAULT_BUTTON_SIZE,
+  DEFAULT_BUTTON_X,
+  DEFAULT_BUTTON_Y,
+} from './render/overlayDefaults';
+import { createDefaultButtonState, createDefaultLogoState } from './render/resetState';
+import { DesktopState, DesktopBootstrapState } from './components/AppState';
 
-type OutputConfig = {
+
+type RenderJob = {
   id: string;
-  ratio: '9:16' | '16:9' | '4:5' | '1:1';
-  duration?: 6 | 15;
+  serverJobId?: string;
+  outputId: string;
   label: string;
-};
-
-const getOutputs = (inputRatio: '16:9' | '9:16'): OutputConfig[] => {
-  if (inputRatio === '16:9') {
-    return [
-      { id: '9:16', ratio: '9:16', label: 'Output: 9:16' },
-      { id: '16:9-6s', ratio: '16:9', duration: 6, label: 'Output: 16:9 (6s cut)' },
-      { id: '16:9-15s', ratio: '16:9', duration: 15, label: 'Output: 16:9 (15s cut)' },
-      { id: '4:5', ratio: '4:5', label: 'Output: 4:5' },
-      { id: '1:1', ratio: '1:1', label: 'Output: 1:1' },
-    ];
-  } else {
-    return [
-      { id: '9:16-6s', ratio: '9:16', duration: 6, label: 'Output: 9:16 (6s cut)' },
-      { id: '9:16-15s', ratio: '9:16', duration: 15, label: 'Output: 9:16 (15s cut)' },
-      { id: '16:9', ratio: '16:9', label: 'Output: 16:9' },
-      { id: '4:5', ratio: '4:5', label: 'Output: 4:5' },
-      { id: '1:1', ratio: '1:1', label: 'Output: 1:1' },
-    ];
-  }
+  filename: string;
+  spec: RenderSpec;
+  status: 'submitting' | 'queued' | 'processing' | 'completed' | 'failed' | 'cancelling' | 'cancelled';
+  progress: number;
+  progressMode?: 'determinate' | 'indeterminate';
+  error?: string;
+  lastPollError?: string; // Track polling errors without changing status
+  lastActionError?: string; // Track action errors (cancel, download) without changing status
+  // Store original submission inputs for retry - ensures retry uses same inputs as original job
+  retryInputs?: {
+    foregroundFile: File;
+    backgroundType: 'video' | 'image';
+    backgroundVideoFile?: File | null;
+    backgroundImageFile?: File | null;
+    logoFile?: File | null;
+    logoUrl?: string | null;
+    buttonImageFile?: File | null;
+    buttonImageUrl?: string | null;
+  };
+  // Track download availability from backend
+  downloadUrl?: string;
 };
 
 function PreviewBox({
@@ -34,7 +55,10 @@ function PreviewBox({
   duration,
   label,
   fgVideo,
+  fgPosition,
+  bgType,
   bgVideo,
+  bgImage,
   blurAmount,
   logo, logoX, logoY, logoSize,
   buttonType, buttonText, buttonImage, buttonX, buttonY, buttonSize,
@@ -50,8 +74,8 @@ function PreviewBox({
       fgVideoRef.current?.pause();
       setIsPlaying(false);
     } else {
-      bgVideoRef.current?.play().catch(() => {});
-      fgVideoRef.current?.play().catch(() => {});
+      bgVideoRef.current?.play().catch(() => { });
+      fgVideoRef.current?.play().catch(() => { });
       setIsPlaying(true);
     }
   };
@@ -101,8 +125,8 @@ function PreviewBox({
     setIsPlaying(false);
   }, [fgVideo, bgVideo]);
 
-  const showOverlays = (inputRatio === '16:9' && ['9:16', '4:5', '1:1'].includes(outputRatio)) || 
-                       (inputRatio === '9:16' && outputRatio === '16:9');
+  const showOverlays = (inputRatio === '16:9' && ['9:16', '4:5', '1:1'].includes(outputRatio)) ||
+    (inputRatio === '9:16' && outputRatio === '16:9');
 
   return (
     <div className="flex flex-col items-center w-full mb-12 pb-8 border-b border-neutral-800/50 last:border-0">
@@ -116,31 +140,45 @@ function PreviewBox({
           {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-1" />}
         </button>
       </div>
-      
-      <div 
-        className={`relative w-full bg-black rounded-3xl overflow-hidden shadow-2xl ring-1 ring-white/10 group transition-all duration-500 ease-in-out ${
-          outputRatio === '9:16' ? 'aspect-[9/16] max-w-[360px]' : 
-          outputRatio === '16:9' ? 'aspect-video max-w-[640px]' : 
-          outputRatio === '4:5' ? 'aspect-[4/5] max-w-[400px]' : 
-          'aspect-square max-w-[450px]'
-        }`}
+
+      <div
+        className={`relative w-full bg-black rounded-3xl overflow-hidden shadow-2xl ring-1 ring-white/10 group transition-all duration-500 ease-in-out ${outputRatio === '9:16' ? 'aspect-[9/16] max-w-[360px]' :
+          outputRatio === '16:9' ? 'aspect-video max-w-[640px]' :
+            outputRatio === '4:5' ? 'aspect-[4/5] max-w-[400px]' :
+              'aspect-square max-w-[450px]'
+          }`}
       >
-        {/* Background Video */}
-        {bgVideo ? (
-          <video
-            ref={bgVideoRef}
-            src={bgVideo}
-            className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 transition-all duration-300"
-            style={{ filter: `blur(${blurAmount}px)` }}
-            muted
-            loop
-            playsInline
-          />
+        {/* Background Video or Image */}
+        {bgType === 'video' ? (
+          bgVideo ? (
+            <video
+              ref={bgVideoRef}
+              src={bgVideo}
+              className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 transition-all duration-300"
+              style={{ filter: `blur(${blurAmount}px)` }}
+              muted
+              loop
+              playsInline
+            />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-700 bg-neutral-900/30">
+              <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
+              <span className="text-xs font-medium uppercase tracking-widest opacity-50">Background Video</span>
+            </div>
+          )
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-700 bg-neutral-900/30">
-            <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
-            <span className="text-xs font-medium uppercase tracking-widest opacity-50">Background</span>
-          </div>
+          bgImage ? (
+            <img
+              src={bgImage}
+              className={`absolute inset-0 w-full h-full pointer-events-none ${['4:5', '1:1'].includes(outputRatio) ? 'object-cover' : 'object-fill'}`}
+              alt="Banner Background"
+            />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-700 bg-neutral-900/30">
+              <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
+              <span className="text-xs font-medium uppercase tracking-widest opacity-50">Banner Image</span>
+            </div>
+          )
         )}
 
         {/* Foreground Video */}
@@ -148,24 +186,30 @@ function PreviewBox({
           <video
             ref={fgVideoRef}
             src={fgVideo}
-            className={`absolute z-10 drop-shadow-2xl cursor-pointer object-contain transition-all duration-500 ${
-              inputRatio === '9:16' && outputRatio === '16:9'
+            className={`absolute z-10 drop-shadow-2xl cursor-pointer object-contain transition-all duration-500 ${inputRatio === '9:16' && outputRatio === '16:9'
+              ? fgPosition === 'right'
                 ? 'right-[40px] top-0 bottom-0 w-auto h-full aspect-[9/16]'
-                : 'inset-0 w-full h-full'
-            }`}
+                : fgPosition === 'left'
+                  ? 'left-[40px] top-0 bottom-0 w-auto h-full aspect-[9/16]'
+                  : 'inset-0 mx-auto w-auto h-full aspect-[9/16]'
+              : 'inset-0 w-full h-full'
+              }`}
             muted={isMuted}
             loop
             playsInline
             onClick={togglePlay}
           />
         ) : (
-          <div className={`absolute flex flex-col items-center justify-center text-neutral-500 z-10 bg-neutral-950/80 backdrop-blur-sm transition-all duration-500 ${
-            inputRatio === '9:16' && outputRatio === '16:9'
+          <div className={`absolute flex flex-col items-center justify-center text-neutral-500 z-10 bg-neutral-950/80 backdrop-blur-sm transition-all duration-500 ${inputRatio === '9:16' && outputRatio === '16:9'
+            ? fgPosition === 'right'
               ? 'right-[40px] top-0 bottom-0 w-auto h-full aspect-[9/16] border-x border-neutral-800/50'
-              : inputRatio === '16:9'
-                ? 'inset-x-0 border-y border-neutral-800/50 my-auto w-full aspect-video h-fit'
-                : 'inset-y-0 border-x border-neutral-800/50 mx-auto h-full aspect-[9/16] w-fit'
-          }`}>
+              : fgPosition === 'left'
+                ? 'left-[40px] top-0 bottom-0 w-auto h-full aspect-[9/16] border-x border-neutral-800/50'
+                : 'inset-y-0 mx-auto h-full aspect-[9/16] w-fit border-x border-neutral-800/50'
+            : inputRatio === '16:9'
+              ? 'inset-x-0 border-y border-neutral-800/50 my-auto w-full aspect-video h-fit'
+              : 'inset-y-0 border-x border-neutral-800/50 mx-auto h-full aspect-[9/16] w-fit'
+            }`}>
             <Film className="w-8 h-8 mb-2 opacity-50" />
             <span className="text-xs font-medium uppercase tracking-widest opacity-80">Foreground</span>
           </div>
@@ -179,13 +223,13 @@ function PreviewBox({
                 {/* Top Empty Space (Logo) */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden p-4">
                   {logo && (
-                    <img 
-                      src={logo} 
-                      alt="Logo" 
+                    <img
+                      src={logo}
+                      alt="Logo"
                       className="max-w-full max-h-full object-contain drop-shadow-lg"
-                      style={{ 
-                        transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` 
-                      }} 
+                      style={{
+                        transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})`
+                      }}
                     />
                   )}
                 </div>
@@ -196,14 +240,14 @@ function PreviewBox({
                 {/* Bottom Empty Space (Button) */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden p-4">
                   {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                    <div 
+                    <div
                       className="flex justify-center items-center w-full"
-                      style={{ 
-                        transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` 
+                      style={{
+                        transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})`
                       }}
                     >
                       {buttonType === 'text' ? (
-                        <div 
+                        <div
                           className="px-8 py-3 font-bold rounded-full whitespace-nowrap text-lg tracking-wide relative overflow-hidden"
                           style={{
                             color: '#FFFFFF',
@@ -217,9 +261,9 @@ function PreviewBox({
                           {buttonText}
                         </div>
                       ) : (
-                        <img 
-                          src={buttonImage!} 
-                          alt="Custom Button" 
+                        <img
+                          src={buttonImage!}
+                          alt="Custom Button"
                           className="max-w-full max-h-full object-contain drop-shadow-xl"
                         />
                       )}
@@ -228,58 +272,99 @@ function PreviewBox({
                 </div>
               </>
             ) : (
-              <div className="absolute inset-0 z-30 flex pointer-events-none">
-                {/* Left Space (Logo and Button) */}
-                <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 relative">
-                  <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                    {logo && (
-                      <img 
-                        src={logo} 
-                        alt="Logo" 
-                        className="max-w-full max-h-full object-contain drop-shadow-lg"
-                        style={{ 
-                          transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` 
-                        }} 
-                      />
-                    )}
-                  </div>
-                  <div className="h-4 shrink-0"></div>
-                  <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                    {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                      <div 
-                        className="flex justify-center items-center w-full"
-                        style={{ 
-                          transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` 
-                        }}
-                      >
-                        {buttonType === 'text' ? (
-                          <div 
-                            className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-sm md:text-base tracking-wide relative overflow-hidden"
-                            style={{
-                              color: '#FFFFFF',
-                              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textShadow: '0px 2px 4px rgba(0, 0, 0, 0.4)',
-                              background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)',
-                              border: '1px solid #D2691E',
-                              boxShadow: '0px 6px 8px 0px rgba(0, 0, 0, 0.5), inset 2px 2px 4px rgba(255, 255, 255, 0.6)',
-                            }}
-                          >
-                            {buttonText}
-                          </div>
-                        ) : (
-                          <img 
-                            src={buttonImage!} 
-                            alt="Custom Button" 
-                            className="max-w-full max-h-full object-contain drop-shadow-xl"
+              <div className="absolute inset-0 z-30 flex pointer-events-none transition-all duration-500">
+                {fgPosition === 'right' ? (
+                  <>
+                    <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 relative">
+                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+                        {logo && (
+                          <img
+                            src={logo}
+                            alt="Logo"
+                            className="max-w-full max-h-full object-contain drop-shadow-lg"
+                            style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }}
                           />
                         )}
                       </div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Right Space (Foreground Video Area) */}
-                <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
+                      <div className="h-4 shrink-0"></div>
+                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+                        {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
+                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                            {buttonType === 'text' ? (
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                {buttonText}
+                              </div>
+                            ) : (
+                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
+                  </>
+                ) : fgPosition === 'left' ? (
+                  <>
+                    <div className="h-full aspect-[9/16] shrink-0 ml-[40px]"></div>
+                    <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 relative">
+                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+                        {logo && (
+                          <img
+                            src={logo}
+                            alt="Logo"
+                            className="max-w-full max-h-full object-contain drop-shadow-lg"
+                            style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }}
+                          />
+                        )}
+                      </div>
+                      <div className="h-4 shrink-0"></div>
+                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+                        {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
+                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                            {buttonType === 'text' ? (
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                {buttonText}
+                              </div>
+                            ) : (
+                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex-1 flex items-center justify-center py-6 px-4 relative">
+                      <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                        {logo && (
+                          <img
+                            src={logo}
+                            alt="Logo"
+                            className="max-w-full max-h-full object-contain drop-shadow-lg"
+                            style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <div className="h-full aspect-[9/16] shrink-0"></div>
+                    <div className="flex-1 flex items-center justify-center py-6 px-4 relative">
+                      <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                        {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
+                          <div className="flex justify-center items-center w-full h-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                            {buttonType === 'text' ? (
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                {buttonText}
+                              </div>
+                            ) : (
+                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -299,97 +384,419 @@ function PreviewBox({
 }
 
 export default function App() {
+  const [bgType, setBgType] = useState<'video' | 'image'>('video');
   const [bgVideo, setBgVideo] = useState<string | null>(null);
-  const [fgVideo, setFgVideo] = useState<string | null>(null);
-  const [fgVideoFile, setFgVideoFile] = useState<File | null>(null);
   const [bgVideoFile, setBgVideoFile] = useState<File | null>(null);
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgImageFile, setBgImageFile] = useState<File | null>(null);
+  const [fgVideo, setFgVideo] = useState<string | null>(null);
+  const [fgFile, setFgFile] = useState<File | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [blurAmount, setBlurAmount] = useState(24); // px
 
   const [logo, setLogo] = useState<string | null>(null);
-  const [logoSize, setLogoSize] = useState(100);
-  const [buttonType, setButtonType] = useState<'text' | 'image'>('text');
-  const [buttonText, setButtonText] = useState('Play Now');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoSize, setLogoSize] = useState(DEFAULT_LOGO_SIZE);
+  const [logoX, setLogoX] = useState(DEFAULT_LOGO_X);
+  const [logoY, setLogoY] = useState(DEFAULT_LOGO_Y);
+  const [buttonType, setButtonType] = useState<'text' | 'image'>(DEFAULT_BUTTON_TYPE);
+  const [buttonText, setButtonText] = useState(DEFAULT_BUTTON_TEXT);
   const [buttonImage, setButtonImage] = useState<string | null>(null);
-  const [buttonSize, setButtonSize] = useState(100);
-  const [buttonX, setButtonX] = useState(0);
-  const [buttonY, setButtonY] = useState(0);
-  const [logoX, setLogoX] = useState(0);
-  const [logoY, setLogoY] = useState(0);
+  const [buttonImageFile, setButtonImageFile] = useState<File | null>(null);
+  const [buttonSize, setButtonSize] = useState(DEFAULT_BUTTON_SIZE);
+  const [buttonX, setButtonX] = useState(DEFAULT_BUTTON_X);
+  const [buttonY, setButtonY] = useState(DEFAULT_BUTTON_Y);
   const [inputRatio, setInputRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [fgPosition, setFgPosition] = useState<'left' | 'center' | 'right'>('right');
+  // Naming metadata
+  const [gameName, setGameName] = useState('');
+  const [version, setVersion] = useState('');
+  const [suffix, setSuffix] = useState('');
+  const [fgDuration, setFgDuration] = useState<number | undefined>(undefined);
+  const [autoDetectedFields, setAutoDetectedFields] = useState<Set<string>>(new Set());
+
+
+  // Job Queue State
+  const [jobs, setJobs] = useState<RenderJob[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Modal for Download Selection
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [selectedDownloads, setSelectedDownloads] = useState<string[]>([]);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
 
-  const outputs = getOutputs(inputRatio);
+  // Bootstrap state for desktop onboarding - always attempt to fetch
+  // The API exists in both dev and desktop modes
+  const [bootstrapState, setBootstrapState] = useState<DesktopBootstrapState | null>(null);
+
+  // Fetch bootstrap state on mount
+  useEffect(() => {
+    const fetchBootstrap = async () => {
+      try {
+        const res = await fetch('/api/bootstrap/state');
+        if (res.ok) {
+          const data = await res.json();
+          // Only set non-idle states (preparing, verifying, ready, blocked)
+          if (data.status !== 'idle') {
+            setBootstrapState(data);
+          }
+        }
+      } catch {
+        // API not available (non-desktop mode) - ignore
+      }
+    };
+
+    fetchBootstrap();
+    const interval = setInterval(fetchBootstrap, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const outputs = deriveOutputs(inputRatio, fgDuration);
 
   const handleOpenDownloadModal = () => {
     setSelectedDownloads(outputs.map(o => o.id));
     setIsDownloadModalOpen(true);
-    setIsDownloading(false);
-    setDownloadProgress(0);
   };
 
   const handleDownload = async () => {
-    if (!fgVideoFile || !bgVideoFile || selectedDownloads.length === 0) {
-      alert("Vui lòng tải lên cả video Foreground và Background!");
+    if (!fgFile) {
       return;
     }
 
-    setIsDownloading(true);
-    setDownloadProgress(20); 
-    
-    // Lấy thông tin output được chọn (chọn 1 output để demo)
-    const outputToRender = outputs.find(o => o.id === selectedDownloads[0]);
+    const selectedOutputs = outputs.filter((output) => selectedDownloads.includes(output.id));
+    setIsDownloadModalOpen(false);
+    setIsSidebarOpen(true);
 
-    // Đóng gói dữ liệu gửi đi
-    const formData = new FormData();
-    formData.append('fgVideo', fgVideoFile);
-    formData.append('bgVideo', bgVideoFile);
-    formData.append('blurAmount', blurAmount.toString());
-    formData.append('ratio', outputToRender?.ratio || '9:16');
-
-    try {
-      setDownloadProgress(50); // Báo hiệu đang xử lý FFmpeg
-      
-      // MỚI: Gọi API bằng đường dẫn tương đối (vì FE và BE chạy chung port)
-      const response = await fetch('/api/render', {
-        method: 'POST',
-        body: formData,
+    for (const output of selectedOutputs) {
+      const spec = buildRenderSpec({
+        inputRatio,
+        outputRatio: output.ratio,
+        duration: output.duration,
+        fgPosition,
+        bgType,
+        blurAmount,
+        logoX,
+        logoY,
+        logoSize,
+        buttonType,
+        buttonText,
+        buttonX,
+        buttonY,
+        buttonSize,
+        gameName,
+        version,
+        suffix,
       });
 
-      if (!response.ok) throw new Error('Render failed on server');
+      const localId = Math.random().toString(36).slice(2);
 
-      setDownloadProgress(90);
+      const pendingJob: RenderJob = {
+        id: localId,
+        outputId: output.id,
+        label: output.label,
+        filename: spec.outputFilename,
+        spec,
+        status: 'submitting',
+        progress: 0,
+        // Store submission inputs for retry - must use same inputs as original submission
+        retryInputs: {
+          foregroundFile: fgFile,
+          backgroundType: bgType,
+          backgroundVideoFile: bgType === 'video' ? bgVideoFile : null,
+          backgroundImageFile: bgType === 'image' ? bgImageFile : null,
+          logoFile,
+          logoUrl: logo,
+          buttonImageFile,
+          buttonImageUrl: buttonImage,
+        },
+      };
 
-      // Nhận và tải file video kết quả về trình duyệt
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `rendered_${outputToRender?.id || 'video'}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      setJobs((prev) => [...prev, pendingJob]);
 
-      setDownloadProgress(100);
-    } catch (error) {
-      console.error("Lỗi:", error);
-      alert("Đã xảy ra lỗi khi render video.");
-    } finally {
-      setTimeout(() => {
-        setIsDownloading(false);
-        setIsDownloadModalOpen(false);
-      }, 1000);
+      try {
+        const overlayPng = await createOverlayPng(spec, {
+          logoUrl: logo,
+          logoFile,
+          buttonImageUrl: buttonImage,
+          buttonImageFile,
+        });
+
+        const result = await createRenderJob({
+          spec,
+          foregroundFile: fgFile,
+          backgroundVideoFile: bgType === 'video' ? bgVideoFile : null,
+          backgroundImageFile: bgType === 'image' ? bgImageFile : null,
+          overlayPng,
+        });
+
+        setJobs((prev) => prev.map((job) =>
+          job.id === localId
+            ? { ...job, serverJobId: result.jobId, status: result.status, progress: 0 }
+            : job,
+        ));
+      } catch (error) {
+        setJobs((prev) => prev.map((job) =>
+          job.id === localId
+            ? {
+              ...job,
+              status: 'failed',
+              error: error instanceof Error ? error.message : 'Failed to submit job',
+            }
+            : job,
+        ));
+      }
     }
   };
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      const activeJobs = jobs.filter(
+        (job) => job.serverJobId && !['completed', 'failed', 'cancelled'].includes(job.status),
+      );
+
+      if (activeJobs.length === 0) {
+        return;
+      }
+
+      await Promise.all(activeJobs.map(async (job) => {
+        if (!job.serverJobId) {
+          return;
+        }
+        try {
+          const state = await getRenderJob(job.serverJobId);
+          setJobs((prev) => prev.map((item) =>
+            item.id === job.id
+              ? {
+                  ...item,
+                  status: state.status,
+                  progress: state.progress,
+                  progressMode: state.progressMode,
+                  error: state.error,
+                  downloadUrl: state.downloadUrl, // Track download availability
+                  // Capture outputFilename from backend as fallback/verification
+                  filename: state.outputFilename || item.filename,
+                  lastPollError: undefined, // Clear error on successful poll
+                  lastActionError: undefined, // Clear action errors on status update
+                }
+              : item,
+          ));
+        } catch (error) {
+          // Don't change job status on polling error - just track the error
+          // This prevents losing job state due to temporary network issues
+          setJobs((prev) => prev.map((item) =>
+            item.id === job.id
+              ? {
+                ...item,
+                lastPollError: error instanceof Error ? error.message : 'Failed to refresh job',
+              }
+              : item,
+          ));
+        }
+      }));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [jobs]);
+
+  const handleCancelJob = async (jobId: string) => {
+    const target = jobs.find((job) => job.id === jobId);
+    if (!target) {
+      return;
+    }
+
+    // Store previous status in case we need to revert on failure
+    const previousStatus = target.status;
+
+    // Only set to 'cancelling' if we have a serverJobId (meaning it was submitted)
+    // This prevents inventing a lifecycle state the backend never knew about
+    if (target.serverJobId) {
+      setJobs((prev) => prev.map((job) =>
+        job.id === jobId ? { ...job, status: 'cancelling', lastActionError: undefined } : job,
+      ));
+    }
+
+    if (!target.serverJobId) {
+      // No server job yet - just cancel locally (wasn't submitted to backend)
+      setJobs((prev) => prev.map((job) =>
+        job.id === jobId ? { ...job, status: 'cancelled', lastActionError: undefined } : job,
+      ));
+      return;
+    }
+
+    try {
+      await cancelRenderJob(target.serverJobId);
+    } catch (error) {
+      // Cancel failed - revert to previous status since backend never confirmed the cancel
+      // Backend remains source of truth for lifecycle
+      setJobs((prev) => prev.map((job) =>
+        job.id === jobId
+          ? {
+            ...job,
+            status: previousStatus, // Revert to what backend knew
+            lastActionError: error instanceof Error ? error.message : 'Failed to cancel job',
+          }
+          : job,
+      ));
+    }
+  };
+
+  const removeJob = (jobId: string) => {
+    setJobs(prev => prev.filter(j => j.id !== jobId));
+  };
+
+  // Retry a failed job - creates a NEW backend job with the SAME inputs as original submission
+  const handleRetryJob = async (jobId: string) => {
+    const targetJob = jobs.find(j => j.id === jobId);
+    if (!targetJob || targetJob.status !== 'failed') {
+      return;
+    }
+
+    // Must have retryInputs from original submission
+    if (!targetJob.retryInputs) {
+      setJobs(prev => prev.map(job =>
+        job.id === jobId
+          ? { ...job, error: 'Cannot retry: original submission inputs not available' }
+          : job
+      ));
+      return;
+    }
+
+    const { retryInputs } = targetJob;
+
+    // Create new job with new localId, using ORIGINAL submission inputs
+    const newLocalId = Math.random().toString(36).slice(2);
+    
+    const pendingJob: RenderJob = {
+      id: newLocalId,
+      outputId: targetJob.outputId,
+      label: targetJob.label,
+      filename: targetJob.filename,
+      spec: targetJob.spec,
+      status: 'submitting',
+      progress: 0,
+      // IMPORTANT: Use the stored retryInputs, not current editor state!
+        retryInputs: {
+          foregroundFile: retryInputs.foregroundFile,
+          backgroundType: retryInputs.backgroundType,
+          backgroundVideoFile: retryInputs.backgroundVideoFile,
+          backgroundImageFile: retryInputs.backgroundImageFile,
+          logoFile: retryInputs.logoFile,
+          logoUrl: retryInputs.logoUrl,
+          buttonImageFile: retryInputs.buttonImageFile,
+          buttonImageUrl: retryInputs.buttonImageUrl,
+        },
+    };
+
+    setJobs(prev => [...prev, pendingJob]);
+
+    try {
+      const overlayPng = await createOverlayPng(targetJob.spec, {
+        logoUrl: retryInputs.logoUrl ?? undefined,
+        logoFile: retryInputs.logoFile ?? undefined,
+        buttonImageUrl: retryInputs.buttonImageUrl ?? undefined,
+        buttonImageFile: retryInputs.buttonImageFile ?? undefined,
+      });
+
+      const result = await createRenderJob({
+        spec: targetJob.spec,
+        foregroundFile: retryInputs.foregroundFile,
+        backgroundVideoFile: retryInputs.backgroundType === 'video' ? retryInputs.backgroundVideoFile ?? null : null,
+        backgroundImageFile: retryInputs.backgroundType === 'image' ? retryInputs.backgroundImageFile ?? null : null,
+        overlayPng,
+      });
+
+      setJobs(prev => prev.map(job =>
+        job.id === newLocalId
+          ? { ...job, serverJobId: result.jobId, status: result.status, progress: 0 }
+          : job
+      ));
+    } catch (error) {
+      setJobs(prev => prev.map(job =>
+        job.id === newLocalId
+          ? {
+            ...job,
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'Failed to retry job',
+          }
+          : job
+      ));
+    }
+  };
+
+  // Bulk retry all failed jobs
+  const handleBulkRetryFailed = async () => {
+    const failedJobs = jobs.filter(j => j.status === 'failed');
+    for (const job of failedJobs) {
+      await handleRetryJob(job.id);
+    }
+  };
+
+  // Bulk clear finished/cancelled jobs (not active ones)
+  const handleBulkClearFinished = () => {
+    const finishedStatuses = ['completed', 'failed', 'cancelled'];
+    setJobs(prev => prev.filter(j => !finishedStatuses.includes(j.status)));
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadResult = async (job: RenderJob) => {
+    if (!job.serverJobId) {
+      return;
+    }
+
+    try {
+      const blob = await downloadRenderJob(job.serverJobId);
+      downloadBlob(blob, job.filename);
+    } catch (error) {
+      // Track error for UI display, then rethrow so bulk download can collect failures
+      setJobs((prev) => prev.map((j) =>
+        j.id === job.id
+          ? {
+            ...j,
+            lastActionError: error instanceof Error ? error.message : 'Failed to download',
+          }
+          : j,
+      ));
+      // Rethrow so caller (like downloadAllResults) can collect failures
+      throw error;
+    }
+  };
+
+  const downloadAllResults = async () => {
+    // Only download jobs that are actually downloadable (have downloadUrl)
+    const downloadable = jobs.filter((job) => job.status === 'completed' && job.downloadUrl);
+    const failed: string[] = [];
+    
+    for (const job of downloadable) {
+      try {
+        await downloadResult(job);
+      } catch (err) {
+        failed.push(getJobDisplayName(job));
+      }
+    }
+    
+    // If any downloads failed, show feedback
+    if (failed.length > 0) {
+      alert(`Failed to download: ${failed.join(', ')}`);
+    }
+  };
+
 
   const handleButtonImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setButtonImage(URL.createObjectURL(file));
+      setButtonImageFile(file);
       setButtonType('image');
     }
   };
@@ -398,33 +805,96 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       setLogo(URL.createObjectURL(file));
+      setLogoFile(file);
+    }
+  };
+
+  const handleBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setBgImage(URL.createObjectURL(file));
+      setBgImageFile(file);
+      setBgType('image');
     }
   };
 
   const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setBgVideoFile(file); // MỚI: Lưu file để gửi lên server
       setBgVideo(URL.createObjectURL(file));
+      setBgVideoFile(file);
+      setBgType('video');
     }
   };
 
   const handleFgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setFgVideoFile(file); // MỚI: Lưu file để gửi lên server
       setFgVideo(URL.createObjectURL(file));
+      setFgFile(file);
+      // Đọc duration thực từ video
+      const tempUrl = URL.createObjectURL(file);
+      const tempVid = document.createElement('video');
+      tempVid.preload = 'metadata';
+      tempVid.src = tempUrl;
+      tempVid.onloadedmetadata = () => {
+        setFgDuration(tempVid.duration); // đơn vị giây, có thể là số thực
+        URL.revokeObjectURL(tempUrl);
+      };
+
+
+
+      // Auto-detect naming metadata từ tên file
+      const detected = parseVideoNamingMeta(file.name);
+      const newAutoFields = new Set<string>();
+
+      if (detected.gameName && !gameName) {
+        setGameName(detected.gameName);
+        newAutoFields.add('gameName');
+      }
+      if (detected.version && !version) {
+        setVersion(detected.version);
+        newAutoFields.add('version');
+      }
+      if (detected.suffix && !suffix) {
+        setSuffix(detected.suffix);
+        newAutoFields.add('suffix');
+      }
+      setAutoDetectedFields(newAutoFields);
     }
   };
+
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
   };
 
+  // Reset handlers for logo and button
+  // Both handlers perform full reset: transform + asset
+  const handleResetLogo = () => {
+    const next = createDefaultLogoState();
+    setLogo(next.image);
+    setLogoFile(next.imageFile);
+    setLogoSize(next.size);
+    setLogoX(next.x);
+    setLogoY(next.y);
+  };
+
+  const handleResetButton = () => {
+    const next = createDefaultButtonState();
+    setButtonType(next.type);
+    setButtonText(next.text);
+    setButtonSize(next.size);
+    setButtonX(next.x);
+    setButtonY(next.y);
+    setButtonImage(next.image);
+    setButtonImageFile(next.imageFile);
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50 p-4 md:p-8 font-sans selection:bg-blue-500/30">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16">
-        
+
         {/* Controls Section */}
         <div className="lg:col-span-7 space-y-8 flex flex-col justify-center">
           <div>
@@ -436,25 +906,29 @@ export default function App() {
             </p>
           </div>
 
-          <div className="space-y-6">
-            {/* Input Format Control */}
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-500">
-                    <Film className="w-4 h-4" />
-                  </div>
-                  Input Format
-                </h2>
-              </div>
-              <div className="flex bg-neutral-800 p-1 rounded-lg">
+          {/* Desktop Bootstrap State - show all states including ready */}
+          {bootstrapState && (
+            <div className="mb-4">
+              <DesktopState initialState={bootstrapState} />
+            </div>
+          )}
+
+          {/* Input Format Control */}
+          <div className="space-y-3">
+            <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+              Input Format
+            </div>
+
+            {/* Format toggle */}
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">Format</label>
+              <div className="flex gap-2 bg-neutral-800 p-1 rounded-lg">
                 {(['16:9', '9:16'] as const).map((ratio) => (
                   <button
                     key={ratio}
-                    onClick={() => {
-                      setInputRatio(ratio);
-                    }}
-                    className={`flex-1 text-sm font-medium py-2 rounded-md transition-colors ${inputRatio === ratio ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                    onClick={() => { setInputRatio(ratio); }}
+                    className={`flex-1 text-sm font-medium py-2 rounded-md transition-colors ${inputRatio === ratio ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'
+                      }`}
                   >
                     {ratio}
                   </button>
@@ -462,194 +936,331 @@ export default function App() {
               </div>
             </div>
 
-            {/* Foreground Upload */}
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">
-                    <Film className="w-4 h-4" />
-                  </div>
-                  Foreground Video
-                </h2>
-                <span className="text-xs font-medium px-2.5 py-1 bg-neutral-800 text-neutral-300 rounded-full">{inputRatio}</span>
-              </div>
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-blue-500/50 transition-all group">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-blue-400 transition-colors" />
-                  <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
-                  <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
-                </div>
-                <input type="file" className="hidden" accept="video/*" onChange={handleFgUpload} />
+            {/* Tên game */}
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">
+                Tên game
+                {autoDetectedFields.has('gameName') && (
+                  <span className="ml-2 text-[10px] text-emerald-400 font-medium">● Auto-detected</span>
+                )}
               </label>
-              {fgVideo && <p className="mt-3 text-sm text-green-400 flex items-center gap-2">✓ Foreground video loaded</p>}
+              <input
+                type="text"
+                value={gameName}
+                onChange={(e) => {
+                  setGameName(e.target.value);
+                  setAutoDetectedFields(prev => { const s = new Set(prev); s.delete('gameName'); return s; });
+                }}
+                placeholder="e.g. HeroWars"
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+              />
             </div>
 
-            {/* Background Upload */}
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-500">
-                    <ImageIcon className="w-4 h-4" />
-                  </div>
-                  Background Video
-                </h2>
-                <span className="text-xs font-medium px-2.5 py-1 bg-neutral-800 text-neutral-300 rounded-full">{inputRatio}</span>
-              </div>
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-purple-500/50 transition-all group">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-purple-400 transition-colors" />
-                  <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
-                  <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
-                </div>
-                <input type="file" className="hidden" accept="video/*" onChange={handleBgUpload} />
+            {/* Version */}
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">
+                Version
+                {autoDetectedFields.has('version') && (
+                  <span className="ml-2 text-[10px] text-emerald-400 font-medium">● Auto-detected</span>
+                )}
               </label>
-              {bgVideo && <p className="mt-3 text-sm text-green-400 flex items-center gap-2">✓ Background video loaded</p>}
+              <input
+                type="text"
+                value={version}
+                onChange={(e) => {
+                  setVersion(e.target.value);
+                  setAutoDetectedFields(prev => { const s = new Set(prev); s.delete('version'); return s; });
+                }}
+                placeholder="e.g. v1, v02, KR_A"
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+              />
             </div>
 
-            {/* Blur Control */}
+            {/* Hậu tố */}
+            <div>
+              <label className="block text-xs text-neutral-400 mb-1">
+                Hậu tố
+                {autoDetectedFields.has('suffix') && (
+                  <span className="ml-2 text-[10px] text-emerald-400 font-medium">● Auto-detected</span>
+                )}
+              </label>
+              <input
+                type="text"
+                value={suffix}
+                onChange={(e) => {
+                  setSuffix(e.target.value);
+                  setAutoDetectedFields(prev => { const s = new Set(prev); s.delete('suffix'); return s; });
+                }}
+                placeholder="e.g. A1, Android, EN, UGC"
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            {/* Preview tên output */}
+            {(gameName || version || suffix) && (
+              <div className="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2">
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Preview tên file</div>
+                <div className="text-xs text-neutral-300 font-mono break-all">
+                  {buildOutputFilename(
+                    { gameName: gameName || 'untitled', version: version || 'v1', suffix },
+                    inputRatio === '16:9' ? '9:16' : '16:9',
+                    fgDuration
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          {inputRatio === '9:16' && (
+            <div className="mt-4 pt-4 border-t border-neutral-800">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-neutral-300">Foreground Position (16:9 Output)</h3>
+              </div>
+              <div className="flex bg-neutral-800 p-1 rounded-lg">
+                {(['left', 'center', 'right'] as const).map((pos) => (
+                  <button
+                    key={pos}
+                    onClick={() => setFgPosition(pos)}
+                    className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors capitalize ${fgPosition === pos ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Foreground Upload */}
+          <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">
+                  <Film className="w-4 h-4" />
+                </div>
+                Foreground Video
+              </h2>
+              <span className="text-xs font-medium px-2.5 py-1 bg-neutral-800 text-neutral-300 rounded-full">{inputRatio}</span>
+            </div>
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-blue-500/50 transition-all group">
+              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-blue-400 transition-colors" />
+                <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
+                <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
+              </div>
+              <input type="file" className="hidden" accept="video/*" onChange={handleFgUpload} />
+            </label>
+            {fgVideo && <p className="mt-3 text-sm text-green-400 flex items-center gap-2">✓ Foreground video loaded</p>}
+          </div>
+
+          {/* Background Upload */}
+          <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-500">
+                  <ImageIcon className="w-4 h-4" />
+                </div>
+                Background
+              </h2>
+              <span className="text-xs font-medium px-2.5 py-1 bg-neutral-800 text-neutral-300 rounded-full">{inputRatio}</span>
+            </div>
+
+            <div className="flex bg-neutral-800 p-1 rounded-lg mb-4">
+              <button
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${bgType === 'video' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                onClick={() => setBgType('video')}
+              >Video (Blurred)</button>
+              <button
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${bgType === 'image' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                onClick={() => setBgType('image')}
+              >Banner Image</button>
+            </div>
+
+            {bgType === 'video' ? (
+              <>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-purple-500/50 transition-all group">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-purple-400 transition-colors" />
+                    <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
+                    <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
+                  </div>
+                  <input type="file" className="hidden" accept="video/*" onChange={handleBgUpload} />
+                </label>
+                {bgVideo && <p className="mt-3 text-sm text-green-400 flex items-center gap-2">✓ Background video loaded</p>}
+              </>
+            ) : (
+              <>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-purple-500/50 transition-all group">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-purple-400 transition-colors" />
+                    <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload banner</span></p>
+                    <p className="text-xs text-neutral-500">JPG, PNG, or WebP</p>
+                  </div>
+                  <input type="file" className="hidden" accept="image/*" onChange={handleBgImageUpload} />
+                </label>
+                {bgImage && <p className="mt-3 text-sm text-green-400 flex items-center gap-2">✓ Banner image loaded</p>}
+              </>
+            )}
+          </div>
+
+          {/* Blur Control */}
+          {bgType === 'video' && (
             <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-neutral-300">Background Blur Intensity</h2>
                 <span className="text-xs font-mono text-neutral-500">{blurAmount}px</span>
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="64" 
-                value={blurAmount} 
+              <input
+                type="range"
+                min="0"
+                max="64"
+                value={blurAmount}
                 onChange={(e) => setBlurAmount(Number(e.target.value))}
                 className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
             </div>
+          )}
 
-            {/* Logo Control */}
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
-                    <ImageIcon className="w-4 h-4" />
-                  </div>
-                  Logo Overlay
-                </h2>
-              </div>
-              
-              {!logo ? (
-                <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-emerald-500/50 transition-all group mb-4">
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
-                    <p className="text-sm text-neutral-400">Upload Logo (Image)</p>
-                  </div>
-                  <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
-                </label>
-              ) : (
-                <div className="flex items-center justify-between bg-neutral-800 rounded-xl p-3 mb-4 border border-neutral-700">
-                  <span className="text-sm text-emerald-400 flex items-center gap-2">✓ Logo loaded</span>
-                  <button onClick={() => setLogo(null)} className="text-xs text-neutral-400 hover:text-white px-2 py-1 bg-neutral-700 rounded-md">Remove</button>
+          {/* Logo Control */}
+          <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
+                  <ImageIcon className="w-4 h-4" />
                 </div>
-              )}
-
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Size</span>
-                    <span>{logoSize}%</span>
-                  </div>
-                  <input type="range" min="10" max="250" value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Position X</span>
-                    <span>{logoX}px</span>
-                  </div>
-                  <input type="range" min="-500" max="500" value={logoX} onChange={(e) => setLogoX(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Position Y</span>
-                    <span>{logoY}px</span>
-                  </div>
-                  <input type="range" min="-500" max="500" value={logoY} onChange={(e) => setLogoY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                </div>
-              </div>
+                Logo Overlay
+              </h2>
             </div>
 
-            {/* Button Control */}
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500">
-                    <Type className="w-4 h-4" />
-                  </div>
-                  Call to Action Button
-                </h2>
-              </div>
-              
-              <div className="flex bg-neutral-800 p-1 rounded-lg mb-4">
-                <button 
-                  className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${buttonType === 'text' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
-                  onClick={() => setButtonType('text')}
-                >Text Style</button>
-                <button 
-                  className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${buttonType === 'image' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
-                  onClick={() => setButtonType('image')}
-                >Custom Image</button>
-              </div>
-
-              {buttonType === 'text' ? (
-                <div className="mb-4">
-                  <label className="block text-xs text-neutral-400 mb-1">Button Text</label>
-                  <input 
-                    type="text" 
-                    value={buttonText} 
-                    onChange={(e) => setButtonText(e.target.value)}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
-                    placeholder="Enter button text..."
-                  />
+            {!logo ? (
+              <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-emerald-500/50 transition-all group mb-4">
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
+                  <p className="text-sm text-neutral-400">Upload Logo (Image)</p>
                 </div>
-              ) : (
-                <div className="mb-4">
-                  {!buttonImage ? (
-                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-amber-500/50 transition-all group">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-amber-400 transition-colors" />
-                        <p className="text-sm text-neutral-400">Upload Button Image</p>
-                      </div>
-                      <input type="file" className="hidden" accept="image/*" onChange={handleButtonImageUpload} />
-                    </label>
-                  ) : (
-                    <div className="flex items-center justify-between bg-neutral-800 rounded-xl p-3 border border-neutral-700">
-                      <span className="text-sm text-amber-400 flex items-center gap-2">✓ Image loaded</span>
-                      <button onClick={() => setButtonImage(null)} className="text-xs text-neutral-400 hover:text-white px-2 py-1 bg-neutral-700 rounded-md">Remove</button>
+                <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
+              </label>
+            ) : (
+              <div className="flex items-center justify-between bg-neutral-800 rounded-xl p-3 mb-4 border border-neutral-700">
+                <span className="text-sm text-emerald-400 flex items-center gap-2">✓ Logo loaded</span>
+                <button onClick={() => { setLogo(null); setLogoFile(null); }} className="text-xs text-neutral-400 hover:text-white px-2 py-1 bg-neutral-700 rounded-md">Remove</button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Size</span>
+                  <span>{logoSize}%</span>
+                </div>
+                <input type="range" min="10" max="250" value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Position X</span>
+                  <span>{logoX}px</span>
+                </div>
+                <input type="range" min="-500" max="500" value={logoX} onChange={(e) => setLogoX(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Position Y</span>
+                  <span>{logoY}px</span>
+                </div>
+                <input type="range" min="-500" max="500" value={logoY} onChange={(e) => setLogoY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              </div>
+              <button
+                onClick={handleResetLogo}
+                className="w-full mt-2 py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-500/30"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Logo
+              </button>
+            </div>
+          </div>
+
+          {/* Button Control */}
+          <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 transition-all hover:border-neutral-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500">
+                  <Type className="w-4 h-4" />
+                </div>
+                Call to Action Button
+              </h2>
+            </div>
+
+            <div className="flex bg-neutral-800 p-1 rounded-lg mb-4">
+              <button
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${buttonType === 'text' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                onClick={() => setButtonType('text')}
+              >Text Style</button>
+              <button
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${buttonType === 'image' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                onClick={() => setButtonType('image')}
+              >Custom Image</button>
+            </div>
+
+            {buttonType === 'text' ? (
+              <div className="mb-4">
+                <label className="block text-xs text-neutral-400 mb-1">Button Text</label>
+                <input
+                  type="text"
+                  value={buttonText}
+                  onChange={(e) => setButtonText(e.target.value)}
+                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
+                  placeholder="Enter button text..."
+                />
+              </div>
+            ) : (
+              <div className="mb-4">
+                {!buttonImage ? (
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-amber-500/50 transition-all group">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-amber-400 transition-colors" />
+                      <p className="text-sm text-neutral-400">Upload Button Image</p>
                     </div>
-                  )}
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Size</span>
-                    <span>{buttonSize}%</span>
+                    <input type="file" className="hidden" accept="image/*" onChange={handleButtonImageUpload} />
+                  </label>
+                ) : (
+                  <div className="flex items-center justify-between bg-neutral-800 rounded-xl p-3 border border-neutral-700">
+                    <span className="text-sm text-amber-400 flex items-center gap-2">✓ Image loaded</span>
+                    <button onClick={() => { setButtonImage(null); setButtonImageFile(null); }} className="text-xs text-neutral-400 hover:text-white px-2 py-1 bg-neutral-700 rounded-md">Remove</button>
                   </div>
-                  <input type="range" min="10" max="250" value={buttonSize} onChange={(e) => setButtonSize(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Position X</span>
-                    <span>{buttonX}px</span>
-                  </div>
-                  <input type="range" min="-500" max="500" value={buttonX} onChange={(e) => setButtonX(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                    <span>Position Y</span>
-                    <span>{buttonY}px</span>
-                  </div>
-                  <input type="range" min="-500" max="500" value={buttonY} onChange={(e) => setButtonY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
-                </div>
+                )}
               </div>
-            </div>
+            )}
 
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Size</span>
+                  <span>{buttonSize}%</span>
+                </div>
+                <input type="range" min="10" max="250" value={buttonSize} onChange={(e) => setButtonSize(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Position X</span>
+                  <span>{buttonX}px</span>
+                </div>
+                <input type="range" min="-500" max="500" value={buttonX} onChange={(e) => setButtonX(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-neutral-400 mb-1">
+                  <span>Position Y</span>
+                  <span>{buttonY}px</span>
+                </div>
+                <input type="range" min="-500" max="500" value={buttonY} onChange={(e) => setButtonY(Number(e.target.value))} className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              </div>
+              <button
+                onClick={handleResetButton}
+                className="w-full mt-2 py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors border border-amber-500/30"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Button
+              </button>
+            </div>
           </div>
         </div>
 
@@ -684,7 +1295,10 @@ export default function App() {
               duration={output.duration}
               label={output.label}
               fgVideo={fgVideo}
+              fgPosition={fgPosition}
+              bgType={bgType}
               bgVideo={bgVideo}
+              bgImage={bgImage}
               blurAmount={blurAmount}
               logo={logo}
               logoX={logoX}
@@ -702,81 +1316,162 @@ export default function App() {
         </div>
       </div>
 
-      {/* Download Modal */}
+      {/* Modals and Overlays */}
       {isDownloadModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <Download className="w-5 h-5 text-blue-500" />
-                Download Outputs
+                Queue For Export
               </h2>
-              <button 
-                onClick={() => !isDownloading && setIsDownloadModalOpen(false)} 
-                disabled={isDownloading}
-                className="text-neutral-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-neutral-800 disabled:opacity-50"
-              >
+              <button onClick={() => setIsDownloadModalOpen(false)} className="text-neutral-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-neutral-800">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            {isDownloading ? (
-              <div className="py-8 flex flex-col items-center justify-center">
-                <div className="w-full bg-neutral-800 rounded-full h-3 mb-4 overflow-hidden">
-                  <div 
-                    className="bg-blue-500 h-3 rounded-full transition-all duration-200" 
-                    style={{ width: `${downloadProgress}%` }}
-                  ></div>
-                </div>
-                <p className="text-neutral-400 font-medium animate-pulse">Processing videos... {downloadProgress}%</p>
+            <div className="space-y-3 mb-8 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-neutral-700">
+              {outputs.map(output => (
+                <label key={output.id} className="flex items-center gap-3 p-3.5 rounded-xl bg-neutral-800/50 border border-neutral-700/50 cursor-pointer hover:bg-neutral-800 transition-colors group">
+                  <input
+                    type="checkbox"
+                    checked={selectedDownloads.includes(output.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedDownloads(prev => [...prev, output.id]);
+                      else setSelectedDownloads(prev => prev.filter(id => id !== output.id));
+                    }}
+                    className="w-5 h-5 rounded border-neutral-600 text-blue-500 bg-neutral-700 cursor-pointer"
+                  />
+                  <span className="text-sm font-medium text-neutral-200 group-hover:text-white">{output.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsDownloadModalOpen(false)} className="flex-1 py-2.5 rounded-xl font-medium text-neutral-300 bg-neutral-800 hover:bg-neutral-700">Cancel</button>
+              <button onClick={handleDownload} disabled={selectedDownloads.length === 0} className="flex-1 py-2.5 rounded-xl font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2">
+                <Download className="w-4 h-4" /> Add Queue ({selectedDownloads.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSidebarOpen && (
+        <div className="fixed inset-y-0 right-0 w-80 bg-neutral-900 border-l border-neutral-800 shadow-2xl z-40 flex flex-col">
+          <div className="p-5 border-b border-neutral-800 flex items-center justify-between bg-neutral-950/50">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Film className="w-5 h-5 text-blue-500" /> Render Queue
+            </h2>
+            <button onClick={() => setIsSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-neutral-800 text-neutral-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-neutral-700">
+            {jobs.length === 0 ? (
+              <div className="text-center text-neutral-500 py-12 flex flex-col items-center">
+                <Film className="w-8 h-8 mb-3 opacity-20" />
+                <span className="text-sm">No active tasks</span>
               </div>
             ) : (
-              <>
-                <div className="space-y-3 mb-8 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-transparent">
-                  {outputs.map(output => (
-                    <label key={output.id} className="flex items-center gap-3 p-3.5 rounded-xl bg-neutral-800/50 border border-neutral-700/50 cursor-pointer hover:bg-neutral-800 transition-colors group">
-                      <div className="relative flex items-center justify-center">
-                        <input 
-                          type="checkbox" 
-                          checked={selectedDownloads.includes(output.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedDownloads(prev => [...prev, output.id]);
-                            } else {
-                              setSelectedDownloads(prev => prev.filter(id => id !== output.id));
-                            }
-                          }}
-                          className="peer w-5 h-5 rounded border-neutral-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-neutral-900 bg-neutral-700 cursor-pointer appearance-none checked:bg-blue-500 checked:border-blue-500 transition-all"
-                        />
-                        <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity" viewBox="0 0 14 10" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M1 5L4.5 8.5L13 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
+              jobs.map(job => (
+                <div key={job.id} className="bg-neutral-800/40 border border-neutral-700/80 rounded-xl p-4 flex flex-col gap-3 group relative overflow-hidden transition-all">
+                  <div className="flex items-start justify-between relative z-10">
+                    <div className="pr-12">
+                      <h4 className="text-sm font-medium text-white line-clamp-1">{getJobDisplayName(job)}</h4>
+                      <p className={`text-xs mt-0.5 font-medium ${job.status === 'processing' ? 'text-blue-400 animate-pulse' : job.status === 'completed' ? 'text-green-400' : job.status === 'failed' ? 'text-red-400' : 'text-neutral-400 capitalize'}`}>
+                        {job.status === 'processing' && job.progressMode === 'indeterminate' ? 'Processing...' : job.status}
+                      </p>
+                      {/* Show polling error if exists */}
+                      {job.lastPollError && (
+                        <p className="text-[10px] mt-0.5 text-amber-400">Network error: {job.lastPollError}</p>
+                      )}
+                      {/* Show action error if exists (cancel, download failures) */}
+                      {job.lastActionError && (
+                        <p className="text-[10px] mt-0.5 text-amber-400">Action error: {job.lastActionError}</p>
+                      )}
+                      {/* Show error message for failed jobs */}
+                      {job.status === 'failed' && job.error && (
+                        <p className="text-[10px] mt-0.5 text-red-400 truncate">{job.error}</p>
+                      )}
+                    </div>
+                    <div className="absolute right-0 top-0 flex gap-1">
+                      {(job.status === 'submitting' || job.status === 'queued' || job.status === 'processing' || job.status === 'cancelling') && (
+                        <button onClick={() => handleCancelJob(job.id)} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:text-red-300 bg-red-400/10 hover:bg-red-400/20 rounded">Cancel</button>
+                      )}
+                      {job.status === 'failed' && (
+                        <button onClick={() => handleRetryJob(job.id)} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 hover:text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 rounded">Retry</button>
+                      )}
+                      {(job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') && (
+                        <button onClick={() => removeJob(job.id)} className="p-1 w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-300 hover:bg-neutral-700/50 rounded transition-colors">
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {job.status === 'processing' && (
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-end mb-1.5">
+                        <span className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">Progress</span>
+                        <span className="text-xs font-medium text-white">
+                          {job.progressMode === 'indeterminate' ? 'Unknown duration' : `${job.progress}%`}
+                        </span>
                       </div>
-                      <span className="text-sm font-medium text-neutral-200 group-hover:text-white transition-colors">{output.label}</span>
-                    </label>
-                  ))}
+                      <div className="w-full bg-neutral-950 rounded-full h-1.5 overflow-hidden ring-1 ring-white/5">
+                        <div className={`h-full transition-all duration-300 ease-out relative ${job.progressMode === 'indeterminate' ? 'bg-amber-500 animate-pulse w-full' : 'bg-blue-500'}`} style={{ width: job.progressMode === 'indeterminate' ? '100%' : `${job.progress}%` }}>
+                          {job.progressMode !== 'indeterminate' && <div className="absolute inset-0 bg-white/20 w-full animate-progress-shimmer"></div>}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {job.status === 'completed' && job.downloadUrl && (
+                    <button onClick={() => downloadResult(job)} className="relative z-10 w-full mt-1 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-blue-900/40">
+                      <Download className="w-3.5 h-3.5" /> Save Video
+                    </button>
+                  )}
+                  {job.status === 'processing' && (
+                    <div className="absolute bottom-0 left-0 h-0.5 bg-blue-500/50 transition-all duration-300" style={{ width: job.progressMode === 'indeterminate' ? '100%' : `${job.progress}%` }}></div>
+                  )}
                 </div>
 
-                <div className="flex gap-3">
-                  <button 
-                    onClick={() => setIsDownloadModalOpen(false)}
-                    className="flex-1 py-2.5 rounded-xl font-medium text-neutral-300 bg-neutral-800 hover:bg-neutral-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={handleDownload}
-                    disabled={selectedDownloads.length === 0}
-                    className="flex-1 py-2.5 rounded-xl font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download ({selectedDownloads.length})
-                  </button>
-                </div>
-              </>
+              ))
+            )}
+            {jobs.some(job => job.status === 'completed' && job.downloadUrl) && (
+              <button
+                onClick={downloadAllResults}
+                className="w-full py-2.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-green-900/40 mt-2"
+              >
+                <Download className="w-3.5 h-3.5" /> Download All
+              </button>
+            )}
+            {/* Bulk actions */}
+            {jobs.some(job => job.status === 'failed') && (
+              <button
+                onClick={handleBulkRetryFailed}
+                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 mt-2"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Retry All Failed
+              </button>
+            )}
+            {jobs.some(job => ['completed', 'failed', 'cancelled'].includes(job.status)) && (
+              <button
+                onClick={handleBulkClearFinished}
+                className="w-full py-2 bg-neutral-700 hover:bg-neutral-600 text-neutral-300 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 mt-2"
+              >
+                Clear Finished
+              </button>
             )}
           </div>
         </div>
+      )}
+
+      {!isSidebarOpen && jobs.length > 0 && (
+        <button onClick={() => setIsSidebarOpen(true)} className="fixed bottom-6 right-6 z-40 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-500 transition-transform hover:scale-[1.05] group flex items-center justify-center">
+          <div className="relative">
+            <Film className="w-6 h-6" />
+            <span className="absolute -top-3 -right-3 bg-red-500 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-neutral-900">
+              {jobs.filter(j => ['submitting', 'queued', 'processing', 'cancelling'].includes(j.status)).length}
+            </span>
+          </div>
+        </button>
       )}
     </div>
   );
