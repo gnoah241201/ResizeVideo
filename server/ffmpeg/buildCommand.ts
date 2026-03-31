@@ -1,0 +1,140 @@
+import { RenderSpec } from '../../shared/render-contract';
+import { EncoderMode } from '../services/encoderConfig';
+
+export const getOutputDimensions = (ratio: RenderSpec['outputRatio']) => {
+  switch (ratio) {
+    case '9:16':
+      return { w: 1080, h: 1920 };
+    case '16:9':
+      return { w: 1920, h: 1080 };
+    case '4:5':
+      return { w: 1080, h: 1350 };
+    case '1:1':
+      return { w: 1080, h: 1080 };
+  }
+};
+
+export const buildFfmpegCommand = (params: {
+  spec: RenderSpec;
+  foregroundPath: string;
+  backgroundVideoPath?: string;
+  backgroundImagePath?: string;
+  overlayPath?: string;
+  outputPath: string;
+  encoder?: EncoderMode;
+}) => {
+  // Default to libx264 (CPU baseline) if not specified
+  const encoder: EncoderMode = params.encoder || 'libx264';
+  const { spec } = params;
+  const { w, h } = getOutputDimensions(spec.outputRatio);
+
+  const args: string[] = ['-y', '-i', params.foregroundPath];
+
+  if (spec.bgType === 'image' && params.backgroundImagePath) {
+    args.push('-loop', '1', '-i', params.backgroundImagePath);
+  } else if (spec.bgType === 'video' && params.backgroundVideoPath) {
+    args.push('-i', params.backgroundVideoPath);
+  } else {
+    args.push('-f', 'lavfi', '-i', `color=c=black:s=${w}x${h}`);
+  }
+
+  const hasOverlay = Boolean(params.overlayPath);
+  if (hasOverlay) {
+    args.push('-i', params.overlayPath!);
+  }
+
+  const filterGroups: string[] = [];
+  const bgIndex = 1;
+
+  if (spec.bgType === 'image' && params.backgroundImagePath) {
+    if (['4:5', '1:1'].includes(spec.outputRatio)) {
+      filterGroups.push(`[${bgIndex}:v]scale=${w}:${h}:force_original_aspect_ratio=increase:flags=spline,crop=${w}:${h},setsar=1[bg_ready]`);
+    } else {
+      filterGroups.push(`[${bgIndex}:v]scale=${w}:${h}:flags=spline,setsar=1[bg_ready]`);
+    }
+  } else if (spec.bgType === 'video' && params.backgroundVideoPath) {
+    filterGroups.push(`[${bgIndex}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=${spec.blurAmount}:5[bg_ready]`);
+  } else {
+    filterGroups.push(`[${bgIndex}:v]copy[bg_ready]`);
+  }
+
+  let fgScaleStr = '';
+  let fgPosX = 0;
+  let fgPosY = 0;
+
+  if (spec.inputRatio === '16:9') {
+    if (spec.outputRatio === '16:9') {
+      fgScaleStr = `scale=${w}:${h}`;
+      fgPosY = 0;
+    } else {
+      fgScaleStr = `scale=${w}:-2`;
+      fgPosY = (h - (w * 9) / 16) / 2;
+    }
+  } else if (spec.outputRatio === '9:16') {
+    fgScaleStr = `scale=${w}:${h}`;
+  } else if (spec.outputRatio === '16:9') {
+    fgScaleStr = `scale=-2:${h}`;
+    const fgWidth = (h * 9) / 16;
+    const cssToPhysicalScale = w / 640;
+    const physicalPadding = 40 * cssToPhysicalScale;
+
+    if (spec.fgPosition === 'right') {
+      fgPosX = w - fgWidth - physicalPadding;
+    } else if (spec.fgPosition === 'left') {
+      fgPosX = physicalPadding;
+    } else {
+      fgPosX = (w - fgWidth) / 2;
+    }
+  } else {
+    fgScaleStr = `scale=-2:${h}`;
+    fgPosX = (w - ((h * 9) / 16)) / 2;
+  }
+
+  filterGroups.push(`[0:v]${fgScaleStr}[fg_ready]`);
+
+  if (spec.bgType === 'image' && params.backgroundImagePath) {
+    filterGroups.push(`[bg_ready][fg_ready]overlay=${fgPosX}:${fgPosY}:shortest=1[bg_fg]`);
+  } else {
+    filterGroups.push(`[bg_ready][fg_ready]overlay=${fgPosX}:${fgPosY}[bg_fg]`);
+  }
+
+  if (hasOverlay) {
+    filterGroups.push(`[bg_fg][2:v]overlay=0:0[final_v]`);
+  } else {
+    filterGroups.push('[bg_fg]copy[final_v]');
+  }
+
+  // Build encoder arguments based on selected encoder
+  // Note: NVENC and libx264 have different optimal settings
+  if (encoder === 'h264_nvenc') {
+    // NVIDIA NVENC encoder settings
+    // Using 'slow' preset which is more universally supported
+    args.push(
+      '-filter_complex', filterGroups.join('; '),
+      '-map', '[final_v]',
+      '-map', '0:a?',
+      '-c:v', 'h264_nvenc',
+      '-preset', 'slow',         // Universal preset name supported by most NVENC builds
+      '-b:v', '5M',             // Bitrate for consistent quality
+      '-pix_fmt', 'yuv420p',
+    );
+  } else {
+    // CPU baseline: libx264 settings
+    args.push(
+      '-filter_complex', filterGroups.join('; '),
+      '-map', '[final_v]',
+      '-map', '0:a?',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+    );
+  }
+
+  if (spec.duration) {
+    args.push('-t', String(spec.duration));
+  }
+
+  args.push(params.outputPath);
+  return args;
+};
