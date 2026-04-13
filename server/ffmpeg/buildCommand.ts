@@ -47,7 +47,13 @@ export const buildFfmpegCommand = (params: {
   const bgIndex = 1;
 
   if (spec.bgType === 'image' && params.backgroundImagePath) {
-    if (['4:5', '1:1'].includes(spec.outputRatio)) {
+    if (['4:5', '1:1'].includes(spec.outputRatio) && spec.backgroundImageMode === 'precomposed') {
+      const scaledW = w * 3;
+      const scaledH = h * 3;
+      const cropX = w;
+      const cropY = scaledH - h;
+      filterGroups.push(`[${bgIndex}:v]scale=${scaledW}:${scaledH}:force_original_aspect_ratio=increase:flags=spline,crop=${w}:${h}:${cropX}:${cropY},setsar=1[bg_ready]`);
+    } else if (['4:5', '1:1'].includes(spec.outputRatio)) {
       filterGroups.push(`[${bgIndex}:v]scale=${w}:${h}:force_original_aspect_ratio=increase:flags=spline,crop=${w}:${h},setsar=1[bg_ready]`);
     } else {
       filterGroups.push(`[${bgIndex}:v]scale=${w}:${h}:flags=spline,setsar=1[bg_ready]`);

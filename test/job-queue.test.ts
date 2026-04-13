@@ -37,6 +37,7 @@ const createSpec = (index: number): RenderJobRecord['spec'] => ({
   duration: 30,
   fgPosition: 'right',
   bgType: 'video',
+  backgroundImageMode: 'clean',
   blurAmount: 24,
   logoX: 0,
   logoY: 0,

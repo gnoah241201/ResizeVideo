@@ -1,4 +1,4 @@
-import { RenderSpec, InputRatio, AspectRatio, BackgroundType, ForegroundPosition, ButtonType } from '../../shared/render-contract';
+import { RenderSpec, InputRatio, AspectRatio, BackgroundType, ForegroundPosition, ButtonType, BackgroundImageMode } from '../../shared/render-contract';
 
 export interface ValidationError {
   error: string;
@@ -15,6 +15,7 @@ export interface InputUploadPaths {
 const VALID_INPUT_RATIOS: InputRatio[] = ['16:9', '9:16'];
 const VALID_OUTPUT_RATIOS: AspectRatio[] = ['9:16', '16:9', '4:5', '1:1'];
 const VALID_BG_TYPES: BackgroundType[] = ['video', 'image'];
+const VALID_BG_IMAGE_MODES: BackgroundImageMode[] = ['clean', 'precomposed'];
 const VALID_FG_POSITIONS: ForegroundPosition[] = ['left', 'center', 'right'];
 const VALID_BUTTON_TYPES: ButtonType[] = ['text', 'image'];
 
@@ -92,6 +93,16 @@ export function validateRenderSpec(
       errors.push({
         error: 'ValidationError',
         message: 'backgroundVideo is required when bgType is video',
+      });
+    }
+  }
+
+  // 7a. backgroundImageMode validation (optional, only when bgType === 'image')
+  if (s.bgType === 'image' && s.backgroundImageMode !== undefined) {
+    if (!isValidRatio(s.backgroundImageMode, VALID_BG_IMAGE_MODES)) {
+      errors.push({
+        error: 'ValidationError',
+        message: `backgroundImageMode must be one of: ${VALID_BG_IMAGE_MODES.join(', ')}`,
       });
     }
   }

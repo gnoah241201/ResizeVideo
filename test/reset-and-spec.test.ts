@@ -45,6 +45,7 @@ test('buildRenderSpec receives default reset values unchanged', () => {
     duration: 30,
     fgPosition: 'right',
     bgType: 'video',
+    backgroundImageMode: 'clean',
     blurAmount: 24,
     logoX: logo.x,
     logoY: logo.y,

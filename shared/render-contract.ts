@@ -6,6 +6,8 @@ export type ForegroundPosition = 'left' | 'center' | 'right';
 
 export type BackgroundType = 'video' | 'image';
 
+export type BackgroundImageMode = 'clean' | 'precomposed';
+
 export type ButtonType = 'text' | 'image';
 
 export type RenderJobStatus =
@@ -29,6 +31,7 @@ export interface RenderSpec {
   duration?: number;
   fgPosition: ForegroundPosition;
   bgType: BackgroundType;
+  backgroundImageMode: BackgroundImageMode;
   blurAmount: number;
   logoX: number;
   logoY: number;

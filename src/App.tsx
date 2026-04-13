@@ -58,6 +58,7 @@ function PreviewBox({
   bgType,
   bgVideo,
   bgImage,
+  backgroundImageMode,
   blurAmount,
   logo, logoX, logoY, logoSize,
   buttonType, buttonText, buttonImage, buttonX, buttonY, buttonSize,
@@ -171,6 +172,11 @@ function PreviewBox({
               src={bgImage}
               className={`absolute inset-0 w-full h-full pointer-events-none ${['4:5', '1:1'].includes(outputRatio) ? 'object-cover' : 'object-fill'}`}
               alt="Banner Background"
+              style={
+                bgType === 'image' && backgroundImageMode === 'precomposed' && ['4:5', '1:1'].includes(outputRatio)
+                  ? { transform: 'scale(3)', transformOrigin: 'center bottom' }
+                  : undefined
+              }
             />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-700 bg-neutral-900/30">
@@ -391,6 +397,7 @@ export default function App() {
   const [bgVideoFile, setBgVideoFile] = useState<File | null>(null);
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [bgImageFile, setBgImageFile] = useState<File | null>(null);
+  const [backgroundImageMode, setBackgroundImageMode] = useState<'clean' | 'precomposed'>('clean');
   const [fgVideo, setFgVideo] = useState<string | null>(null);
   const [fgFile, setFgFile] = useState<File | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -459,6 +466,7 @@ export default function App() {
         duration: output.duration,
         fgPosition,
         bgType,
+        backgroundImageMode,
         blurAmount,
         logoX,
         logoY,
@@ -1136,6 +1144,24 @@ export default function App() {
               >Banner Image</button>
             </div>
 
+            {bgType === 'image' && (
+              <div className="mb-4">
+                <div className="flex bg-neutral-800 p-1 rounded-lg">
+                  <button
+                    className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${backgroundImageMode === 'clean' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                    onClick={() => setBackgroundImageMode('clean')}
+                  >Banner sạch</button>
+                  <button
+                    className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${backgroundImageMode === 'precomposed' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}`}
+                    onClick={() => setBackgroundImageMode('precomposed')}
+                  >Banner đã có logo/button</button>
+                </div>
+                {backgroundImageMode === 'precomposed' && (
+                  <p className="mt-2 text-xs text-neutral-500">Banner đã có logo/button sẽ tự zoom nền cho output 4:5 và 1:1</p>
+                )}
+              </div>
+            )}
+
             {bgType === 'video' ? (
               <>
                 <label
@@ -1383,6 +1409,7 @@ export default function App() {
               bgType={bgType}
               bgVideo={bgVideo}
               bgImage={bgImage}
+              backgroundImageMode={backgroundImageMode}
               blurAmount={blurAmount}
               logo={logo}
               logoX={logoX}
