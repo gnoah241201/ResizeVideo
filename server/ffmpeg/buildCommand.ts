@@ -105,7 +105,8 @@ export const buildFfmpegCommand = (params: {
   }
 
   // Build encoder arguments based on selected encoder
-  // Note: NVENC and libx264 have different optimal settings
+  // Bitrate target: 5000-7000 kbps range (avg 6M, cap 7M)
+  // Frame rate: 30 FPS default for all outputs
   if (encoder === 'h264_nvenc') {
     // NVIDIA NVENC encoder settings
     // Using 'slow' preset which is more universally supported
@@ -114,8 +115,11 @@ export const buildFfmpegCommand = (params: {
       '-map', '[final_v]',
       '-map', '0:a?',
       '-c:v', 'h264_nvenc',
-      '-preset', 'slow',         // Universal preset name supported by most NVENC builds
-      '-b:v', '5M',             // Bitrate for consistent quality
+      '-preset', 'slow',
+      '-b:v', '6M',
+      '-maxrate', '7M',
+      '-bufsize', '14M',
+      '-r', '30',
       '-pix_fmt', 'yuv420p',
     );
   } else {
@@ -126,7 +130,10 @@ export const buildFfmpegCommand = (params: {
       '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
-      '-crf', '18',
+      '-b:v', '6M',
+      '-maxrate', '7M',
+      '-bufsize', '14M',
+      '-r', '30',
       '-pix_fmt', 'yuv420p',
     );
   }

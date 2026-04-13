@@ -29,6 +29,8 @@ export const parseVideoNamingMeta = (filename: string): Partial<NamingMeta> => {
 export const buildOutputFilename = (meta: NamingMeta, ratio: string, duration?: number): string => {
   const ratioStr = ratio.replace(':', 'x');
   const durationStr = duration ? `_${Math.round(duration)}s` : '';
-  const parts = [meta.gameName, meta.version, meta.suffix].filter(Boolean);
-  return `${parts.join('_')}_${ratioStr}${durationStr}.mp4`;
+  const nameParts = [meta.gameName, meta.version].filter(Boolean);
+  const sizePart = `${ratioStr}${durationStr}`;
+  const suffixPart = meta.suffix ? `_${meta.suffix}` : '';
+  return `${nameParts.join('_')}_${sizePart}${suffixPart}.mp4`;
 };

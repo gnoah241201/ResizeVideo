@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JobQueueService } from '../services/jobQueue';
@@ -208,8 +209,9 @@ export const buildJobsRouter = (queue: JobQueueService) => {
       return;
     }
 
-    const output = await queue.readOutput(req.params.id);
-    if (!output) {
+    try {
+      await fs.access(job.files.outputPath);
+    } catch {
       // Output file missing but job says completed - might have been deleted externally
       res.status(410).json({
         error: 'Gone',
@@ -219,8 +221,22 @@ export const buildJobsRouter = (queue: JobQueueService) => {
     }
 
     res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${job.outputFilename || 'output.mp4'}"`);
-    res.send(output);
+    res.download(job.files.outputPath, job.outputFilename || 'output.mp4', (error) => {
+      if (!error) {
+        return;
+      }
+
+      if (res.headersSent) {
+        console.error(`[jobs] Download stream failed for job ${job.id}:`, error);
+        return;
+      }
+
+      console.error(`[jobs] Failed to send download for job ${job.id}:`, error);
+      res.status(500).json({
+        error: 'InternalError',
+        message: 'Failed to stream job output',
+      });
+    });
   });
 
   return router;
