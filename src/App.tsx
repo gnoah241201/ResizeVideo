@@ -288,20 +288,20 @@ function PreviewBox({
                       <div className="h-4 shrink-0"></div>
                       <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
                         {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
-                            {buttonType === 'text' ? (
-                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
-                                {buttonText}
-                              </div>
-                            ) : (
-                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
-                            )}
-                          </div>
-                        )}
-                      </div>
+                        <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                          {buttonType === 'text' ? (
+                            <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                              {buttonText}
+                            </div>
+                          ) : (
+                            <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
-                  </>
+                  </div>
+                  <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
+                </>
                 ) : fgPosition === 'left' ? (
                   <>
                     <div className="h-full aspect-[9/16] shrink-0 ml-[40px]"></div>
@@ -319,20 +319,20 @@ function PreviewBox({
                       <div className="h-4 shrink-0"></div>
                       <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
                         {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
-                            {buttonType === 'text' ? (
-                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
-                                {buttonText}
-                              </div>
-                            ) : (
-                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
-                            )}
-                          </div>
-                        )}
-                      </div>
+                        <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                          {buttonType === 'text' ? (
+                            <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                              {buttonText}
+                            </div>
+                          ) : (
+                            <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </>
-                ) : (
+                  </div>
+                </>
+              ) : (
                   <>
                     <div className="flex-1 flex items-center justify-center py-6 px-4 relative">
                       <div className="w-full h-full flex items-center justify-center overflow-hidden">
@@ -382,6 +382,9 @@ function PreviewBox({
   );
 }
 
+type DropZone = 'foreground' | 'bgVideo' | 'bgImage' | 'logo' | 'buttonImage' | null;
+type DropZoneKey = Exclude<DropZone, null>;
+
 export default function App() {
   const [bgType, setBgType] = useState<'video' | 'image'>('video');
   const [bgVideo, setBgVideo] = useState<string | null>(null);
@@ -413,6 +416,16 @@ export default function App() {
   const [suffix, setSuffix] = useState('');
   const [fgDuration, setFgDuration] = useState<number | undefined>(undefined);
   const [autoDetectedFields, setAutoDetectedFields] = useState<Set<string>>(new Set());
+
+  // Drag-and-drop state
+  const [activeDropZone, setActiveDropZone] = useState<DropZone>(null);
+  const dragDepthRef = useRef<Record<DropZoneKey, number>>({
+    foreground: 0,
+    bgVideo: 0,
+    bgImage: 0,
+    logo: 0,
+    buttonImage: 0,
+  });
 
 
   // Job Queue State
@@ -765,75 +778,150 @@ export default function App() {
   };
 
 
-  const handleButtonImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setButtonImage(URL.createObjectURL(file));
-      setButtonImageFile(file);
-      setButtonType('image');
+      applyForegroundFile(file);
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const applyForegroundFile = (file: File) => {
+    setFgVideo(URL.createObjectURL(file));
+    setFgFile(file);
+    const tempUrl = URL.createObjectURL(file);
+    const tempVid = document.createElement('video');
+    tempVid.preload = 'metadata';
+    tempVid.src = tempUrl;
+    tempVid.onloadedmetadata = () => {
+      setFgDuration(tempVid.duration);
+      URL.revokeObjectURL(tempUrl);
+    };
+
+    const detected = parseVideoNamingMeta(file.name);
+    const newAutoFields = new Set<string>();
+
+    if (detected.gameName && !gameName) {
+      setGameName(detected.gameName);
+      newAutoFields.add('gameName');
+    }
+    if (detected.version && !version) {
+      setVersion(detected.version);
+      newAutoFields.add('version');
+    }
+    if (detected.suffix && !suffix) {
+      setSuffix(detected.suffix);
+      newAutoFields.add('suffix');
+    }
+    setAutoDetectedFields(newAutoFields);
+  };
+
+  const applyBackgroundVideoFile = (file: File) => {
+    setBgVideo(URL.createObjectURL(file));
+    setBgVideoFile(file);
+    setBgType('video');
+  };
+
+  const applyBackgroundImageFile = (file: File) => {
+    setBgImage(URL.createObjectURL(file));
+    setBgImageFile(file);
+    setBgType('image');
+  };
+
+  const applyLogoFile = (file: File) => {
+    setLogo(URL.createObjectURL(file));
+    setLogoFile(file);
+  };
+
+  const applyButtonImageFile = (file: File) => {
+    setButtonImage(URL.createObjectURL(file));
+    setButtonImageFile(file);
+    setButtonType('image');
+  };
+
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setLogo(URL.createObjectURL(file));
-      setLogoFile(file);
+      applyBackgroundVideoFile(file);
     }
   };
 
   const handleBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setBgImage(URL.createObjectURL(file));
-      setBgImageFile(file);
-      setBgType('image');
+      applyBackgroundImageFile(file);
     }
   };
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setBgVideo(URL.createObjectURL(file));
-      setBgVideoFile(file);
-      setBgType('video');
+      applyLogoFile(file);
     }
   };
 
-  const handleFgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleButtonImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setFgVideo(URL.createObjectURL(file));
-      setFgFile(file);
-      // Đọc duration thực từ video
-      const tempUrl = URL.createObjectURL(file);
-      const tempVid = document.createElement('video');
-      tempVid.preload = 'metadata';
-      tempVid.src = tempUrl;
-      tempVid.onloadedmetadata = () => {
-        setFgDuration(tempVid.duration); // đơn vị giây, có thể là số thực
-        URL.revokeObjectURL(tempUrl);
-      };
+      applyButtonImageFile(file);
+    }
+  };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
 
+  const handleDragEnter = (zone: DropZoneKey) => (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current[zone] += 1;
+    setActiveDropZone(zone);
+  };
 
-      // Auto-detect naming metadata từ tên file
-      const detected = parseVideoNamingMeta(file.name);
-      const newAutoFields = new Set<string>();
+  const handleDragLeave = (zone: DropZoneKey) => (e: React.DragEvent) => {
+    e.preventDefault();
 
-      if (detected.gameName && !gameName) {
-        setGameName(detected.gameName);
-        newAutoFields.add('gameName');
-      }
-      if (detected.version && !version) {
-        setVersion(detected.version);
-        newAutoFields.add('version');
-      }
-      if (detected.suffix && !suffix) {
-        setSuffix(detected.suffix);
-        newAutoFields.add('suffix');
-      }
-      setAutoDetectedFields(newAutoFields);
+    const nextDepth = Math.max(0, dragDepthRef.current[zone] - 1);
+    dragDepthRef.current[zone] = nextDepth;
+
+    if (nextDepth === 0) {
+      setActiveDropZone((current) => (current === zone ? null : current));
+    }
+  };
+
+  const handleDrop = (zone: DropZoneKey) => (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current[zone] = 0;
+    setActiveDropZone((current) => (current === zone ? null : current));
+
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    switch (zone) {
+      case 'foreground':
+        if (file.type.startsWith('video/')) {
+          applyForegroundFile(file);
+        }
+        break;
+      case 'bgVideo':
+        if (file.type.startsWith('video/')) {
+          applyBackgroundVideoFile(file);
+        }
+        break;
+      case 'bgImage':
+        if (file.type.startsWith('image/')) {
+          applyBackgroundImageFile(file);
+        }
+        break;
+      case 'logo':
+        if (file.type.startsWith('image/')) {
+          applyLogoFile(file);
+        }
+        break;
+      case 'buttonImage':
+        if (file.type.startsWith('image/')) {
+          applyButtonImageFile(file);
+        }
+        break;
     }
   };
 
@@ -1008,9 +1096,15 @@ export default function App() {
               </h2>
               <span className="text-xs font-medium px-2.5 py-1 bg-neutral-800 text-neutral-300 rounded-full">{inputRatio}</span>
             </div>
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-blue-500/50 transition-all group">
+            <label
+              className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group ${activeDropZone === 'foreground' ? 'border-blue-500 bg-blue-500/10' : 'border-neutral-700 hover:bg-neutral-800/80 hover:border-blue-500/50'}`}
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter('foreground')}
+              onDragLeave={handleDragLeave('foreground')}
+              onDrop={handleDrop('foreground')}
+            >
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-blue-400 transition-colors" />
+                <Upload className={`w-8 h-8 mb-3 transition-colors ${activeDropZone === 'foreground' ? 'text-blue-400' : 'text-neutral-500 group-hover:text-blue-400'}`} />
                 <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
                 <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
               </div>
@@ -1044,9 +1138,15 @@ export default function App() {
 
             {bgType === 'video' ? (
               <>
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-purple-500/50 transition-all group">
+                <label
+                  className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group ${activeDropZone === 'bgVideo' ? 'border-purple-500 bg-purple-500/10' : 'border-neutral-700 hover:bg-neutral-800/80 hover:border-purple-500/50'}`}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragEnter('bgVideo')}
+                  onDragLeave={handleDragLeave('bgVideo')}
+                  onDrop={handleDrop('bgVideo')}
+                >
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-purple-400 transition-colors" />
+                    <Upload className={`w-8 h-8 mb-3 transition-colors ${activeDropZone === 'bgVideo' ? 'text-purple-400' : 'text-neutral-500 group-hover:text-purple-400'}`} />
                     <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload</span> or drag and drop</p>
                     <p className="text-xs text-neutral-500">MP4, WebM, or OGG</p>
                   </div>
@@ -1056,9 +1156,15 @@ export default function App() {
               </>
             ) : (
               <>
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-purple-500/50 transition-all group">
+                <label
+                  className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all group ${activeDropZone === 'bgImage' ? 'border-purple-500 bg-purple-500/10' : 'border-neutral-700 hover:bg-neutral-800/80 hover:border-purple-500/50'}`}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragEnter('bgImage')}
+                  onDragLeave={handleDragLeave('bgImage')}
+                  onDrop={handleDrop('bgImage')}
+                >
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 mb-3 text-neutral-500 group-hover:text-purple-400 transition-colors" />
+                    <Upload className={`w-8 h-8 mb-3 transition-colors ${activeDropZone === 'bgImage' ? 'text-purple-400' : 'text-neutral-500 group-hover:text-purple-400'}`} />
                     <p className="mb-2 text-sm text-neutral-400"><span className="font-semibold text-neutral-200">Click to upload banner</span></p>
                     <p className="text-xs text-neutral-500">JPG, PNG, or WebP</p>
                   </div>
@@ -1099,9 +1205,15 @@ export default function App() {
             </div>
 
             {!logo ? (
-              <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-emerald-500/50 transition-all group mb-4">
+              <label
+                className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer transition-all group mb-4 ${activeDropZone === 'logo' ? 'border-emerald-500 bg-emerald-500/10' : 'border-neutral-700 hover:bg-neutral-800/80 hover:border-emerald-500/50'}`}
+                onDragOver={handleDragOver}
+                onDragEnter={handleDragEnter('logo')}
+                onDragLeave={handleDragLeave('logo')}
+                onDrop={handleDrop('logo')}
+              >
                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-emerald-400 transition-colors" />
+                  <Upload className={`w-6 h-6 mb-2 transition-colors ${activeDropZone === 'logo' ? 'text-emerald-400' : 'text-neutral-500 group-hover:text-emerald-400'}`} />
                   <p className="text-sm text-neutral-400">Upload Logo (Image)</p>
                 </div>
                 <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
@@ -1181,9 +1293,15 @@ export default function App() {
             ) : (
               <div className="mb-4">
                 {!buttonImage ? (
-                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-neutral-700 border-dashed rounded-xl cursor-pointer hover:bg-neutral-800/80 hover:border-amber-500/50 transition-all group">
+                  <label
+                    className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer transition-all group ${activeDropZone === 'buttonImage' ? 'border-amber-500 bg-amber-500/10' : 'border-neutral-700 hover:bg-neutral-800/80 hover:border-amber-500/50'}`}
+                    onDragOver={handleDragOver}
+                    onDragEnter={handleDragEnter('buttonImage')}
+                    onDragLeave={handleDragLeave('buttonImage')}
+                    onDrop={handleDrop('buttonImage')}
+                  >
                     <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <Upload className="w-6 h-6 mb-2 text-neutral-500 group-hover:text-amber-400 transition-colors" />
+                      <Upload className={`w-6 h-6 mb-2 transition-colors ${activeDropZone === 'buttonImage' ? 'text-amber-400' : 'text-neutral-500 group-hover:text-amber-400'}`} />
                       <p className="text-sm text-neutral-400">Upload Button Image</p>
                     </div>
                     <input type="file" className="hidden" accept="image/*" onChange={handleButtonImageUpload} />
