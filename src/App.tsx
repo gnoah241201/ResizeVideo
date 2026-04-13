@@ -968,7 +968,7 @@ export default function App() {
         <div className="lg:col-span-7 space-y-8 flex flex-col justify-center">
           <div>
             <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 text-white">
-              Vertical Layout <span className="text-blue-500">Editor</span>
+              Resize Video <span className="text-blue-500">Tool</span>
             </h1>
             <p className="text-lg text-neutral-400 max-w-xl">
               Upload a 16:9 foreground and background video to create a seamless 9:16 vertical layout for TikTok, Reels, or Shorts.

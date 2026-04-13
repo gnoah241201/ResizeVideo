@@ -118,6 +118,8 @@ fi
 log "Installing PM2 globally"
 npm install -g pm2
 
+git config --system --add safe.directory "$APP_DIR"
+
 if [[ -d "$APP_DIR/.git" ]]; then
   log "Refreshing existing repository"
   git -C "$APP_DIR" remote set-url origin "$REPO_URL"
@@ -131,6 +133,11 @@ else
 fi
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+log "Applying branding overrides"
+sed -i 's#<title>My Google AI Studio App</title>#<title>Resize Video Tool</title>#' "$APP_DIR/index.html"
+sed -i 's#Vertical Layout <span className="text-blue-500">Editor</span>#Resize Video <span className="text-blue-500">Tool</span>#' "$APP_DIR/src/App.tsx"
+sed -i 's#"name": "react-example"#"name": "resize-video-tool"#' "$APP_DIR/package.json"
 
 run_as_app_user() {
   su - "$APP_USER" -c "cd '$APP_DIR' && $*"
