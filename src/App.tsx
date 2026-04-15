@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { CSSProperties, useState, useRef, useEffect } from 'react';
 import { Upload, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Film, Type, Move, Download, X, RefreshCw, RotateCcw } from 'lucide-react';
 import { NamingMeta, parseVideoNamingMeta, buildOutputFilename } from './naming';
 import { RenderSpec } from '../shared/render-contract';
@@ -18,6 +18,14 @@ import {
   DEFAULT_BUTTON_Y,
 } from './render/overlayDefaults';
 import { createDefaultButtonState, createDefaultLogoState } from './render/resetState';
+import {
+  getAnchorCenteredCropWindow,
+  getOutputFrameDimensions,
+  getPrecomposedHiddenFgAnchorPoint,
+  getScaledCoverDimensions,
+  PRECOMPOSED_BG_SCALE,
+  shouldUsePrecomposedHiddenFgAnchor,
+} from '../shared/precomposedAnchor';
 
 
 type RenderJob = {
@@ -65,6 +73,7 @@ function PreviewBox({
   isMuted
 }: any) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [bgImageNaturalSize, setBgImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const bgVideoRef = useRef<HTMLVideoElement>(null);
   const fgVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -125,8 +134,60 @@ function PreviewBox({
     setIsPlaying(false);
   }, [fgVideo, bgVideo]);
 
+  useEffect(() => {
+    setBgImageNaturalSize(null);
+  }, [bgImage]);
+
   const showOverlays = (inputRatio === '16:9' && ['9:16', '4:5', '1:1'].includes(outputRatio)) ||
     (inputRatio === '9:16' && outputRatio === '16:9');
+
+  const usesHiddenFgAnchorPreview = shouldUsePrecomposedHiddenFgAnchor({
+    bgType,
+    backgroundImageMode,
+    inputRatio,
+    fgPosition,
+    outputRatio,
+  });
+
+  const targetedPreviewLayout = (() => {
+    if (!usesHiddenFgAnchorPreview || !bgImageNaturalSize) {
+      return null;
+    }
+
+    const anchor = getPrecomposedHiddenFgAnchorPoint(fgPosition);
+    if (!anchor) {
+      return null;
+    }
+
+    const frame = getOutputFrameDimensions(outputRatio);
+    const scaled = getScaledCoverDimensions(bgImageNaturalSize, frame, PRECOMPOSED_BG_SCALE);
+    const crop = getAnchorCenteredCropWindow(anchor, scaled, frame);
+
+    return {
+      widthPercent: (scaled.width / frame.width) * 100,
+      heightPercent: (scaled.height / frame.height) * 100,
+      leftPercent: -(crop.x / frame.width) * 100,
+      topPercent: -(crop.y / frame.height) * 100,
+    };
+  })();
+
+  const backgroundImageClassName = targetedPreviewLayout
+    ? 'absolute pointer-events-none max-w-none select-none'
+    : `absolute inset-0 w-full h-full pointer-events-none ${['4:5', '1:1'].includes(outputRatio) ? 'object-cover' : 'object-fill'}`;
+
+  const backgroundImageStyle: CSSProperties | undefined = targetedPreviewLayout
+    ? {
+        width: `${targetedPreviewLayout.widthPercent}%`,
+        height: `${targetedPreviewLayout.heightPercent}%`,
+        left: `${targetedPreviewLayout.leftPercent}%`,
+        top: `${targetedPreviewLayout.topPercent}%`,
+      }
+    : bgType === 'image' && backgroundImageMode === 'precomposed' && ['4:5', '1:1'].includes(outputRatio)
+      ? {
+          transform: `scale(${PRECOMPOSED_BG_SCALE})`,
+          transformOrigin: 'center bottom',
+        }
+      : undefined;
 
   return (
     <div className="flex flex-col items-center w-full mb-12 pb-8 border-b border-neutral-800/50 last:border-0">
@@ -170,13 +231,15 @@ function PreviewBox({
           bgImage ? (
             <img
               src={bgImage}
-              className={`absolute inset-0 w-full h-full pointer-events-none ${['4:5', '1:1'].includes(outputRatio) ? 'object-cover' : 'object-fill'}`}
+              className={backgroundImageClassName}
               alt="Banner Background"
-              style={
-                bgType === 'image' && backgroundImageMode === 'precomposed' && ['4:5', '1:1'].includes(outputRatio)
-                  ? { transform: 'scale(3)', transformOrigin: 'center bottom' }
-                  : undefined
-              }
+              style={backgroundImageStyle}
+              onLoad={(event) => {
+                setBgImageNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                });
+              }}
             />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-700 bg-neutral-900/30">
