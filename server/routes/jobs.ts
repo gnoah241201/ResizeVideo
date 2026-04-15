@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JobQueueService } from '../services/jobQueue';
 import { RenderSpec } from '../../shared/render-contract';
-import { createJobDirs, removeWorkDir, isJobExpired, getRemainingRetentionMs } from '../services/fileStore';
+import { createJobDirs, removeWorkDir, isJobExpired, getRetentionDescription } from '../services/fileStore';
 import { validateRenderSpec } from '../services/validation';
 
 // Extend Express Request to track temp directories
@@ -138,7 +138,7 @@ export const buildJobsRouter = (queue: JobQueueService) => {
     // Check if download is still available
     let downloadUrl: string | undefined;
     if (job.status === 'completed') {
-      const expired = isJobExpired(job.id, 'completed', job.finishedAt);
+      const expired = isJobExpired(job.id, 'completed', job.finishedAt, job.downloadedAt);
       if (!expired) {
         downloadUrl = `/api/jobs/${job.id}/download`;
       }
@@ -199,12 +199,11 @@ export const buildJobsRouter = (queue: JobQueueService) => {
     }
 
     // Check if output has expired due to retention policy
-    if (isJobExpired(job.id, 'completed', job.finishedAt)) {
-      const remainingMs = getRemainingRetentionMs('completed', job.finishedAt);
-      const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+    if (isJobExpired(job.id, 'completed', job.finishedAt, job.downloadedAt)) {
+      const retentionDescription = getRetentionDescription('completed', job.downloadedAt);
       res.status(410).json({
         error: 'Expired',
-        message: `Job output has expired and is no longer available for download. Retention period was 24 hours.`,
+        message: `Job output has expired and is no longer available for download. Retention period was ${retentionDescription}.`,
       });
       return;
     }
@@ -223,6 +222,9 @@ export const buildJobsRouter = (queue: JobQueueService) => {
     res.setHeader('Content-Type', 'video/mp4');
     res.download(job.files.outputPath, job.outputFilename || 'output.mp4', (error) => {
       if (!error) {
+        queue.markJobDownloaded(job.id).catch((markError) => {
+          console.error(`[jobs] Failed to record download for job ${job.id}:`, markError);
+        });
         return;
       }
 

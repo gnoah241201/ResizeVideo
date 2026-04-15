@@ -116,6 +116,34 @@ test('download route streams completed output with attachment headers', async ()
     assert.equal(response.headers.get('content-type'), 'video/mp4');
     assert.match(response.headers.get('content-disposition') ?? '', /attachment; filename="download-test\.mp4"/);
     assert.equal(body, 'streamed-video-output');
+
+    await waitFor(() => !!harness.queue.getJob(harness.jobId)?.downloadedAt);
+    assert.ok(harness.queue.getJob(harness.jobId)?.downloadedAt, 'successful download should start post-download retention timer');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('download route expires completed output 30 minutes after download', async () => {
+  const harness = await createDownloadHarness();
+
+  try {
+    const firstResponse = await fetch(`${harness.baseUrl}/api/jobs/${harness.jobId}/download`);
+    assert.equal(firstResponse.status, 200);
+    await firstResponse.text();
+
+    await waitFor(() => !!harness.queue.getJob(harness.jobId)?.downloadedAt);
+
+    const job = harness.queue.getJob(harness.jobId);
+    assert.ok(job);
+    job.downloadedAt = Date.now() - (31 * 60 * 1000);
+
+    const response = await fetch(`${harness.baseUrl}/api/jobs/${harness.jobId}/download`);
+    const payload = await response.json() as { error: string; message: string };
+
+    assert.equal(response.status, 410);
+    assert.equal(payload.error, 'Expired');
+    assert.match(payload.message, /30 minutes after download/i);
   } finally {
     await harness.close();
   }
