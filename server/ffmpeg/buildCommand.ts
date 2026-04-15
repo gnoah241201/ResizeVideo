@@ -1,18 +1,14 @@
 import { RenderSpec } from '../../shared/render-contract';
+import {
+  getOutputFrameDimensions,
+  getPrecomposedAnchorCropExpressions,
+  getPrecomposedHiddenFgAnchorPoint,
+  PRECOMPOSED_BG_SCALE,
+  shouldUsePrecomposedHiddenFgAnchor,
+} from '../../shared/precomposedAnchor';
 import { EncoderMode } from '../services/encoderConfig';
 
-export const getOutputDimensions = (ratio: RenderSpec['outputRatio']) => {
-  switch (ratio) {
-    case '9:16':
-      return { w: 1080, h: 1920 };
-    case '16:9':
-      return { w: 1920, h: 1080 };
-    case '4:5':
-      return { w: 1080, h: 1350 };
-    case '1:1':
-      return { w: 1080, h: 1080 };
-  }
-};
+export const getOutputDimensions = (ratio: RenderSpec['outputRatio']) => getOutputFrameDimensions(ratio);
 
 export const buildFfmpegCommand = (params: {
   spec: RenderSpec;
@@ -26,7 +22,7 @@ export const buildFfmpegCommand = (params: {
   // Default to libx264 (CPU baseline) if not specified
   const encoder: EncoderMode = params.encoder || 'libx264';
   const { spec } = params;
-  const { w, h } = getOutputDimensions(spec.outputRatio);
+  const { width: w, height: h } = getOutputDimensions(spec.outputRatio);
 
   const args: string[] = ['-y', '-i', params.foregroundPath];
 
@@ -47,9 +43,21 @@ export const buildFfmpegCommand = (params: {
   const bgIndex = 1;
 
   if (spec.bgType === 'image' && params.backgroundImagePath) {
-    if (['4:5', '1:1'].includes(spec.outputRatio) && spec.backgroundImageMode === 'precomposed') {
-      const scaledW = w * 3;
-      const scaledH = h * 3;
+    if (shouldUsePrecomposedHiddenFgAnchor(spec)) {
+      const anchor = getPrecomposedHiddenFgAnchorPoint(spec.fgPosition);
+
+      if (!anchor) {
+        throw new Error('Expected a valid precomposed hidden-FG anchor for supported foreground positions.');
+      }
+
+      const scaledW = w * PRECOMPOSED_BG_SCALE;
+      const scaledH = h * PRECOMPOSED_BG_SCALE;
+      const cropExpressions = getPrecomposedAnchorCropExpressions(anchor);
+
+      filterGroups.push(`[${bgIndex}:v]scale=${scaledW}:${scaledH}:force_original_aspect_ratio=increase:flags=spline,crop=${w}:${h}:${cropExpressions.x}:${cropExpressions.y},setsar=1[bg_ready]`);
+    } else if (['4:5', '1:1'].includes(spec.outputRatio) && spec.backgroundImageMode === 'precomposed') {
+      const scaledW = w * PRECOMPOSED_BG_SCALE;
+      const scaledH = h * PRECOMPOSED_BG_SCALE;
       const cropX = w;
       const cropY = scaledH - h;
       filterGroups.push(`[${bgIndex}:v]scale=${scaledW}:${scaledH}:force_original_aspect_ratio=increase:flags=spline,crop=${w}:${h}:${cropX}:${cropY},setsar=1[bg_ready]`);
