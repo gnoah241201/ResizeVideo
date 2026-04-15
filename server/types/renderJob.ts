@@ -20,5 +20,6 @@ export interface RenderJobRecord {
   error?: string;
   startedAt?: number;
   finishedAt?: number;
+  downloadedAt?: number;
   outputFilename?: string;
 }

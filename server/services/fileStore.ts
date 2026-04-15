@@ -18,6 +18,24 @@ const tempRoot = path.resolve(process.cwd(), 'temp_superpowers', 'native-renders
  */
 const COMPLETED_RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FAILED_RETENTION_MS = 60 * 60 * 1000; // 1 hour
+const POST_DOWNLOAD_RETENTION_MS = 30 * 60 * 1000; // 30 minutes
+
+const getExpiryTime = (
+  status: 'completed' | 'failed',
+  finishedAt?: number,
+  downloadedAt?: number,
+): number | null => {
+  if (status === 'completed' && downloadedAt) {
+    return downloadedAt + POST_DOWNLOAD_RETENTION_MS;
+  }
+
+  if (!finishedAt) {
+    return null;
+  }
+
+  const retentionMs = status === 'completed' ? COMPLETED_RETENTION_MS : FAILED_RETENTION_MS;
+  return finishedAt + retentionMs;
+};
 
 export const ensureTempRoot = async () => {
   await fs.mkdir(tempRoot, { recursive: true });
@@ -78,15 +96,14 @@ export const cleanupJobByWorkDir = async (
 export const isJobExpired = (
   jobId: string,
   status: 'completed' | 'failed',
-  finishedAt?: number
+  finishedAt?: number,
+  downloadedAt?: number,
 ): boolean => {
-  if (!finishedAt) {
+  const expiryTime = getExpiryTime(status, finishedAt, downloadedAt);
+  if (!expiryTime) {
     // No finishedAt means it's still running or old data - treat as not expired for safety
     return false;
   }
-
-  const retentionMs = status === 'completed' ? COMPLETED_RETENTION_MS : FAILED_RETENTION_MS;
-  const expiryTime = finishedAt + retentionMs;
   const expired = Date.now() > expiryTime;
 
   if (expired) {
@@ -103,15 +120,25 @@ export const isJobExpired = (
  */
 export const getRemainingRetentionMs = (
   status: 'completed' | 'failed',
-  finishedAt?: number
+  finishedAt?: number,
+  downloadedAt?: number,
 ): number => {
-  if (!finishedAt) return 0;
-
-  const retentionMs = status === 'completed' ? COMPLETED_RETENTION_MS : FAILED_RETENTION_MS;
-  const expiryTime = finishedAt + retentionMs;
+  const expiryTime = getExpiryTime(status, finishedAt, downloadedAt);
+  if (!expiryTime) return 0;
   const remaining = expiryTime - Date.now();
 
   return Math.max(0, remaining);
+};
+
+export const getRetentionDescription = (
+  status: 'completed' | 'failed',
+  downloadedAt?: number,
+): string => {
+  if (status === 'completed' && downloadedAt) {
+    return '30 minutes after download';
+  }
+
+  return status === 'completed' ? '24 hours after completion' : '1 hour after failure';
 };
 
 /**
@@ -121,13 +148,13 @@ export const getRemainingRetentionMs = (
  * @returns Number of jobs cleaned up
  */
 export const cleanupExpiredJobs = async (
-  jobs: Array<{ id: string; status: string; finishedAt?: number; files: { workDir: string } }>
+  jobs: Array<{ id: string; status: string; finishedAt?: number; downloadedAt?: number; files: { workDir: string } }>
 ): Promise<number> => {
   let cleaned = 0;
 
   for (const job of jobs) {
     if ((job.status === 'completed' || job.status === 'failed') && job.finishedAt) {
-      if (isJobExpired(job.id, job.status, job.finishedAt)) {
+      if (isJobExpired(job.id, job.status, job.finishedAt, job.downloadedAt)) {
         await cleanupJobByWorkDir(job.files.workDir, 'expired', job.id);
         cleaned++;
       }
@@ -145,4 +172,5 @@ export const cleanupExpiredJobs = async (
 export const RETENTION_CONFIG = {
   COMPLETED_RETENTION_MS,
   FAILED_RETENTION_MS,
+  POST_DOWNLOAD_RETENTION_MS,
 } as const;

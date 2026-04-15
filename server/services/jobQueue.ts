@@ -186,7 +186,7 @@ export class JobQueueService {
         const expiredIds = jobsToCheck
           .filter(job => {
             const status = job.status as 'completed' | 'failed';
-            return isJobExpired(job.id, status, job.finishedAt);
+            return isJobExpired(job.id, status, job.finishedAt, job.downloadedAt);
           })
           .map(job => job.id);
         
@@ -312,6 +312,17 @@ export class JobQueueService {
       child.kill('SIGTERM');
     }
     // Persist after state change
+    await this.persistAll();
+    return true;
+  }
+
+  async markJobDownloaded(jobId: string): Promise<boolean> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== 'completed') {
+      return false;
+    }
+
+    job.downloadedAt = Date.now();
     await this.persistAll();
     return true;
   }
