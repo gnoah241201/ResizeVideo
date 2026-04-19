@@ -669,7 +669,7 @@ export default function App() {
           const spec = buildRenderSpec({
             inputRatio,
             outputRatio: trimOutput.ratio,
-            duration: trimOutput.duration,
+            duration: trimOutput.duration ?? fgDuration,
             bitrate,
             fgPosition,
             bgType,
