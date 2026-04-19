@@ -100,31 +100,33 @@ export const createOverlayPng = async (
     if (spec.fgPosition === 'right') {
       const leftSpaceW = logical.w - logicalFgW - 40;
       const usableH = logical.h - 48;
-      const halfH = (usableH - 16) / 2;
+      const logoH = (usableH - 16) * (2 / 3);
+      const buttonH = (usableH - 16) * (1 / 3);
 
       logoContainerW = leftSpaceW - 32;
-      logoContainerH = halfH;
+      logoContainerH = logoH;
       logoCenterX = leftSpaceW / 2;
-      logoCenterY = 24 + halfH / 2;
+      logoCenterY = 24 + logoH / 2;
 
       buttonContainerW = leftSpaceW - 32;
-      buttonContainerH = halfH;
+      buttonContainerH = buttonH;
       buttonCenterX = leftSpaceW / 2;
-      buttonCenterY = 24 + halfH + 16 + halfH / 2;
+      buttonCenterY = 24 + logoH + 16 + buttonH / 2;
     } else if (spec.fgPosition === 'left') {
       const rightSpaceW = logical.w - logicalFgW - 40;
       const usableH = logical.h - 48;
-      const halfH = (usableH - 16) / 2;
+      const logoH = (usableH - 16) * (2 / 3);
+      const buttonH = (usableH - 16) * (1 / 3);
 
       logoContainerW = rightSpaceW - 32;
-      logoContainerH = halfH;
+      logoContainerH = logoH;
       logoCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
-      logoCenterY = 24 + halfH / 2;
+      logoCenterY = 24 + logoH / 2;
 
       buttonContainerW = rightSpaceW - 32;
-      buttonContainerH = halfH;
+      buttonContainerH = buttonH;
       buttonCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
-      buttonCenterY = 24 + halfH + 16 + halfH / 2;
+      buttonCenterY = 24 + logoH + 16 + buttonH / 2;
     } else {
       const sideSpaceW = (logical.w - logicalFgW) / 2;
 

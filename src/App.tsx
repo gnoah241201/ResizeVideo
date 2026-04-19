@@ -4,7 +4,7 @@ import { NamingMeta, parseVideoNamingMeta, buildOutputFilename } from './naming'
 import { RenderSpec } from '../shared/render-contract';
 import { buildRenderSpec } from './render/renderSpec';
 import { createOverlayPng } from './render/overlay';
-import { cancelRenderJob, createRenderJob, downloadRenderJob, getRenderJob } from './render/api';
+import { cancelRenderJob, createRenderJob, createTrimJob, downloadRenderJob, getRenderJob } from './render/api';
 import { deriveOutputs, OutputConfig } from './render/outputDerivation';
 import { getJobDisplayName } from './render/jobDisplay';
 import {
@@ -341,67 +341,99 @@ function PreviewBox({
               </>
             ) : (
               <div className="absolute inset-0 z-30 flex pointer-events-none transition-all duration-500">
-                {fgPosition === 'right' ? (
+                {fgPosition === 'right' ? (() => {
+                  const hasLogo = !!logo;
+                  const hasButton = (buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage);
+                  return (
                   <>
-                    <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 relative">
-                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                        {logo && (
-                          <img
-                            src={logo}
-                            alt="Logo"
-                            className="max-w-full max-h-full object-contain drop-shadow-lg"
-                            style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }}
-                          />
-                        )}
-                      </div>
-                      <div className="h-4 shrink-0"></div>
-                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                        {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                        <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
-                          {buttonType === 'text' ? (
-                            <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
-                              {buttonText}
+                    <div className="flex-1 flex flex-col items-center min-h-0 py-6 px-4 relative">
+                      {hasLogo && hasButton ? (
+                        <>
+                          <div className="flex items-center justify-center w-full overflow-hidden min-h-0" style={{ flex: 2 }}>
+                            <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-lg" style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }} />
+                          </div>
+                          <div className="h-4 shrink-0"></div>
+                          <div className="flex items-center justify-center w-full overflow-hidden min-h-0" style={{ flex: 1 }}>
+                            <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                              {buttonType === 'text' ? (
+                                <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                  {buttonText}
+                                </div>
+                              ) : (
+                                <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                              )}
                             </div>
-                          ) : (
-                            <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
-                          )}
+                          </div>
+                        </>
+                      ) : hasLogo ? (
+                        <div className="flex items-center justify-center w-full h-full overflow-hidden min-h-0">
+                          <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-lg" style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }} />
                         </div>
-                      )}
+                      ) : hasButton ? (
+                        <div className="flex items-center justify-center w-full h-full overflow-hidden min-h-0">
+                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                            {buttonType === 'text' ? (
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                {buttonText}
+                              </div>
+                            ) : (
+                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                  <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
-                </>
-                ) : fgPosition === 'left' ? (
+                    <div className="h-full aspect-[9/16] shrink-0 mr-[40px]"></div>
+                  </>
+                  );
+                })()
+                : fgPosition === 'left' ? (() => {
+                  const hasLogo = !!logo;
+                  const hasButton = (buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage);
+                  return (
                   <>
                     <div className="h-full aspect-[9/16] shrink-0 ml-[40px]"></div>
-                    <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 relative">
-                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                        {logo && (
-                          <img
-                            src={logo}
-                            alt="Logo"
-                            className="max-w-full max-h-full object-contain drop-shadow-lg"
-                            style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }}
-                          />
-                        )}
-                      </div>
-                      <div className="h-4 shrink-0"></div>
-                      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                        {((buttonType === 'text' && buttonText) || (buttonType === 'image' && buttonImage)) && (
-                        <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
-                          {buttonType === 'text' ? (
-                            <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
-                              {buttonText}
+                    <div className="flex-1 flex flex-col items-center min-h-0 py-6 px-4 relative">
+                      {hasLogo && hasButton ? (
+                        <>
+                          <div className="flex items-center justify-center w-full overflow-hidden min-h-0" style={{ flex: 2 }}>
+                            <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-lg" style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }} />
+                          </div>
+                          <div className="h-4 shrink-0"></div>
+                          <div className="flex items-center justify-center w-full overflow-hidden min-h-0" style={{ flex: 1 }}>
+                            <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                              {buttonType === 'text' ? (
+                                <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                  {buttonText}
+                                </div>
+                              ) : (
+                                <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                              )}
                             </div>
-                          ) : (
-                            <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
-                          )}
+                          </div>
+                        </>
+                      ) : hasLogo ? (
+                        <div className="flex items-center justify-center w-full h-full overflow-hidden min-h-0">
+                          <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-lg" style={{ transform: `translate(${logoX}px, ${logoY}px) scale(${logoSize / 100})` }} />
                         </div>
-                      )}
+                      ) : hasButton ? (
+                        <div className="flex items-center justify-center w-full h-full overflow-hidden min-h-0">
+                          <div className="flex justify-center items-center w-full" style={{ transform: `translate(${buttonX}px, ${buttonY}px) scale(${buttonSize / 100})` }}>
+                            {buttonType === 'text' ? (
+                              <div className="px-6 py-2 font-bold rounded-full whitespace-nowrap text-base tracking-wide relative overflow-hidden text-white" style={{ fontFamily: 'system-ui, sans-serif', textShadow: '0px 2px 4px rgba(0,0,0,0.4)', background: 'linear-gradient(to bottom, #FFD700 0%, #FFB800 50%, #FF8A00 100%)', border: '1px solid #D2691E', boxShadow: '0px 6px 8px 0px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.6)' }}>
+                                {buttonText}
+                              </div>
+                            ) : (
+                              <img src={buttonImage!} alt="Custom Button" className="max-w-full max-h-full object-contain drop-shadow-xl" />
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                </>
-              ) : (
+                  </>
+                  );
+                })()
+                : (
                   <>
                     <div className="flex-1 flex items-center justify-center py-6 px-4 relative">
                       <div className="w-full h-full flex items-center justify-center overflow-hidden">
@@ -505,6 +537,7 @@ export default function App() {
   // Modal for Download Selection
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [selectedDownloads, setSelectedDownloads] = useState<string[]>([]);
+  const [customBitrate, setCustomBitrate] = useState('');
 
   const outputs = deriveOutputs(inputRatio, fgDuration);
 
@@ -522,11 +555,24 @@ export default function App() {
     setIsDownloadModalOpen(false);
     setIsSidebarOpen(true);
 
-    for (const output of selectedOutputs) {
+    // Parse custom bitrate (kbps). Empty or invalid → undefined (use default)
+    const parsedBitrate = customBitrate.trim() ? parseInt(customBitrate.trim(), 10) : undefined;
+    const bitrate = parsedBitrate && parsedBitrate > 0 ? parsedBitrate : undefined;
+
+    // Separate primary renders from trim variants
+    const primaryOutputs = selectedOutputs.filter(o => !o.trimFrom);
+    const trimOutputs = selectedOutputs.filter(o => !!o.trimFrom);
+
+    // Track completed primary jobs by output ID for trim job resolution
+    const completedPrimaryJobs = new Map<string, string>(); // outputId -> serverJobId
+
+    // Submit primary render jobs
+    for (const output of primaryOutputs) {
       const spec = buildRenderSpec({
         inputRatio,
         outputRatio: output.ratio,
-        duration: output.duration,
+        duration: output.duration ?? fgDuration,
+        bitrate,
         fgPosition,
         bgType,
         backgroundImageMode,
@@ -600,6 +646,155 @@ export default function App() {
             }
             : job,
         ));
+      }
+    }
+
+    // Submit trim jobs: wait for source primary job to complete, then create trim
+    if (trimOutputs.length > 0) {
+      // Group trim outputs by their source (trimFrom) output ID
+      const trimsBySource = new Map<string, typeof trimOutputs>();
+      for (const trimOutput of trimOutputs) {
+        const sourceId = trimOutput.trimFrom!;
+        if (!trimsBySource.has(sourceId)) {
+          trimsBySource.set(sourceId, []);
+        }
+        trimsBySource.get(sourceId)!.push(trimOutput);
+      }
+
+      // For each source, find matching primary job and wait for completion
+      for (const [sourceOutputId, trims] of trimsBySource) {
+        // Add trim jobs to UI immediately as 'submitting'
+        const trimJobLocalIds: { localId: string; output: OutputConfig }[] = [];
+        for (const trimOutput of trims) {
+          const spec = buildRenderSpec({
+            inputRatio,
+            outputRatio: trimOutput.ratio,
+            duration: trimOutput.duration,
+            bitrate,
+            fgPosition,
+            bgType,
+            backgroundImageMode,
+            blurAmount,
+            logoX,
+            logoY,
+            logoSize,
+            buttonType,
+            buttonText,
+            buttonX,
+            buttonY,
+            buttonSize,
+            gameName,
+            version,
+            suffix,
+          });
+          const localId = Math.random().toString(36).slice(2);
+          const pendingJob: RenderJob = {
+            id: localId,
+            outputId: trimOutput.id,
+            label: trimOutput.label,
+            filename: spec.outputFilename,
+            spec,
+            status: 'submitting',
+            progress: 0,
+          };
+          setJobs((prev) => [...prev, pendingJob]);
+          trimJobLocalIds.push({ localId, output: trimOutput });
+        }
+
+        // Wait for the source primary job to complete (poll until completed)
+        const waitForSource = async (): Promise<string | null> => {
+          // Find the primary job that was submitted for this source output
+          const findSourceServerJobId = (): string | undefined => {
+            // Get latest jobs state
+            let sourceServerJobId: string | undefined;
+            setJobs(prev => {
+              const sourceJob = prev.find(j => j.outputId === sourceOutputId && j.serverJobId);
+              sourceServerJobId = sourceJob?.serverJobId;
+              return prev; // Don't modify state
+            });
+            return sourceServerJobId;
+          };
+
+          // Poll until source job is completed
+          for (let i = 0; i < 600; i++) { // Max ~10 minutes
+            await new Promise(r => setTimeout(r, 1000));
+            const serverJobId = findSourceServerJobId();
+            if (!serverJobId) continue;
+
+            try {
+              const state = await getRenderJob(serverJobId);
+              if (state.status === 'completed') {
+                return serverJobId;
+              }
+              if (state.status === 'failed' || state.status === 'cancelled') {
+                return null; // Source failed, trim cannot proceed
+              }
+            } catch {
+              // Polling error, continue
+            }
+          }
+          return null;
+        };
+
+        // Fire and forget: wait for source then submit trims
+        (async () => {
+          const sourceServerJobId = await waitForSource();
+          if (!sourceServerJobId) {
+            // Source job failed or timed out - mark all trim jobs as failed
+            for (const { localId } of trimJobLocalIds) {
+              setJobs(prev => prev.map(j =>
+                j.id === localId
+                  ? { ...j, status: 'failed', error: 'Source render failed or timed out' }
+                  : j
+              ));
+            }
+            return;
+          }
+
+          // Submit each trim job
+          for (const { localId, output: trimOutput } of trimJobLocalIds) {
+            try {
+              const spec = buildRenderSpec({
+                inputRatio,
+                outputRatio: trimOutput.ratio,
+                duration: trimOutput.duration,
+                bitrate,
+                fgPosition,
+                bgType,
+                backgroundImageMode,
+                blurAmount,
+                logoX,
+                logoY,
+                logoSize,
+                buttonType,
+                buttonText,
+                buttonX,
+                buttonY,
+                buttonSize,
+                gameName,
+                version,
+                suffix,
+              });
+
+              const result = await createTrimJob({
+                spec,
+                sourceJobId: sourceServerJobId,
+              });
+
+              setJobs(prev => prev.map(j =>
+                j.id === localId
+                  ? { ...j, serverJobId: result.jobId, status: result.status, progress: 0 }
+                  : j
+              ));
+            } catch (error) {
+              setJobs(prev => prev.map(j =>
+                j.id === localId
+                  ? { ...j, status: 'failed', error: error instanceof Error ? error.message : 'Failed to submit trim job' }
+                  : j
+              ));
+            }
+          }
+        })();
       }
     }
   };
@@ -1460,7 +1655,7 @@ export default function App() {
             </div>
           </div>
 
-          {outputs.map((output) => (
+          {outputs.filter(o => o.showPreview !== false).map((output) => (
             <PreviewBox
               key={output.id}
               inputRatio={inputRatio}
@@ -1503,6 +1698,20 @@ export default function App() {
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {/* Bitrate Control */}
+            <div className="mb-4">
+              <label className="block text-xs text-neutral-400 mb-1.5">Bitrate (kbps)</label>
+              <input
+                type="number"
+                value={customBitrate}
+                onChange={(e) => setCustomBitrate(e.target.value)}
+                placeholder="Default: 6000 kbps"
+                min="500"
+                max="50000"
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors placeholder:text-neutral-600"
+              />
+            </div>
+
             <div className="space-y-3 mb-8 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-neutral-700">
               {outputs.map(output => (
                 <label key={output.id} className="flex items-center gap-3 p-3.5 rounded-xl bg-neutral-800/50 border border-neutral-700/50 cursor-pointer hover:bg-neutral-800 transition-colors group">
@@ -1515,7 +1724,12 @@ export default function App() {
                     }}
                     className="w-5 h-5 rounded border-neutral-600 text-blue-500 bg-neutral-700 cursor-pointer"
                   />
-                  <span className="text-sm font-medium text-neutral-200 group-hover:text-white">{output.label}</span>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-neutral-200 group-hover:text-white">{output.label}</span>
+                    {output.trimFrom && (
+                      <span className="text-[10px] text-amber-400/70 font-medium">⚡ Trim from full-length (fast)</span>
+                    )}
+                  </div>
                 </label>
               ))}
             </div>
