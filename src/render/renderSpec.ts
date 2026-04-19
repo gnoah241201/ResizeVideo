@@ -5,6 +5,7 @@ type BuilderInput = {
   inputRatio: RenderSpec['inputRatio'];
   outputRatio: RenderSpec['outputRatio'];
   duration?: number;
+  bitrate?: number;
   fgPosition: RenderSpec['fgPosition'];
   bgType: RenderSpec['bgType'];
   backgroundImageMode: RenderSpec['backgroundImageMode'];
@@ -33,6 +34,7 @@ export const buildRenderSpec = (input: BuilderInput): RenderSpec => {
     inputRatio: input.inputRatio,
     outputRatio: input.outputRatio,
     duration: input.duration,
+    bitrate: input.bitrate,
     fgPosition: input.fgPosition,
     bgType: input.bgType,
     backgroundImageMode: input.backgroundImageMode,

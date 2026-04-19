@@ -125,6 +125,45 @@ export const buildJobsRouter = (queue: JobQueueService) => {
     },
   );
 
+  // Trim-only endpoint: creates a job that trims from a completed job's output (stream copy)
+  router.post('/trim', express.json(), async (req, res) => {
+    try {
+      const { spec, sourceJobId } = req.body as { spec?: RenderSpec; sourceJobId?: string };
+
+      if (!spec || !sourceJobId) {
+        res.status(400).json({
+          error: 'ValidationError',
+          message: 'spec and sourceJobId are required',
+        });
+        return;
+      }
+
+      if (!spec.duration || spec.duration <= 0) {
+        res.status(400).json({
+          error: 'ValidationError',
+          message: 'spec.duration is required and must be positive for trim jobs',
+        });
+        return;
+      }
+
+      const job = await queue.createTrimJob(spec, sourceJobId);
+
+      res.json({
+        jobId: job.id,
+        status: job.status,
+      });
+    } catch (error) {
+      console.error(error);
+      const statusCode = error instanceof Error && error.message.includes('not found') ? 404
+        : error instanceof Error && error.message.includes('not completed') ? 409
+        : 500;
+      res.status(statusCode).json({
+        error: statusCode === 404 ? 'NotFound' : statusCode === 409 ? 'NotReady' : 'InternalError',
+        message: error instanceof Error ? error.message : 'Failed to create trim job',
+      });
+    }
+  });
+
   router.get('/:id', (req, res) => {
     const job = queue.getJob(req.params.id);
     if (!job) {

@@ -97,36 +97,72 @@ export const createOverlayPng = async (
   } else {
     const logicalFgW = (logical.h * 9) / 16;
 
+    // Determine which overlays are present for flexible layout
+    const hasLogo = !!(assets.logoFile || assets.logoUrl);
+    const hasButton = (spec.buttonType === 'text' && !!spec.buttonText) || (spec.buttonType === 'image' && !!(assets.buttonImageFile || assets.buttonImageUrl));
+
     if (spec.fgPosition === 'right') {
       const leftSpaceW = logical.w - logicalFgW - 40;
       const usableH = logical.h - 48;
-      const logoH = (usableH - 16) * (2 / 3);
-      const buttonH = (usableH - 16) * (1 / 3);
 
-      logoContainerW = leftSpaceW - 32;
-      logoContainerH = logoH;
-      logoCenterX = leftSpaceW / 2;
-      logoCenterY = 24 + logoH / 2;
+      if (hasLogo && hasButton) {
+        // Both present: original 2/3 + 1/3 split
+        const logoH = (usableH - 16) * (2 / 3);
+        const buttonH = (usableH - 16) * (1 / 3);
 
-      buttonContainerW = leftSpaceW - 32;
-      buttonContainerH = buttonH;
-      buttonCenterX = leftSpaceW / 2;
-      buttonCenterY = 24 + logoH + 16 + buttonH / 2;
+        logoContainerW = leftSpaceW - 32;
+        logoContainerH = logoH;
+        logoCenterX = leftSpaceW / 2;
+        logoCenterY = 24 + logoH / 2;
+
+        buttonContainerW = leftSpaceW - 32;
+        buttonContainerH = buttonH;
+        buttonCenterX = leftSpaceW / 2;
+        buttonCenterY = 24 + logoH + 16 + buttonH / 2;
+      } else if (hasLogo) {
+        // Only logo: full height
+        logoContainerW = leftSpaceW - 32;
+        logoContainerH = usableH;
+        logoCenterX = leftSpaceW / 2;
+        logoCenterY = logical.h / 2;
+      } else if (hasButton) {
+        // Only button: full height
+        buttonContainerW = leftSpaceW - 32;
+        buttonContainerH = usableH;
+        buttonCenterX = leftSpaceW / 2;
+        buttonCenterY = logical.h / 2;
+      }
     } else if (spec.fgPosition === 'left') {
       const rightSpaceW = logical.w - logicalFgW - 40;
       const usableH = logical.h - 48;
-      const logoH = (usableH - 16) * (2 / 3);
-      const buttonH = (usableH - 16) * (1 / 3);
 
-      logoContainerW = rightSpaceW - 32;
-      logoContainerH = logoH;
-      logoCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
-      logoCenterY = 24 + logoH / 2;
+      if (hasLogo && hasButton) {
+        // Both present: original 2/3 + 1/3 split
+        const logoH = (usableH - 16) * (2 / 3);
+        const buttonH = (usableH - 16) * (1 / 3);
 
-      buttonContainerW = rightSpaceW - 32;
-      buttonContainerH = buttonH;
-      buttonCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
-      buttonCenterY = 24 + logoH + 16 + buttonH / 2;
+        logoContainerW = rightSpaceW - 32;
+        logoContainerH = logoH;
+        logoCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
+        logoCenterY = 24 + logoH / 2;
+
+        buttonContainerW = rightSpaceW - 32;
+        buttonContainerH = buttonH;
+        buttonCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
+        buttonCenterY = 24 + logoH + 16 + buttonH / 2;
+      } else if (hasLogo) {
+        // Only logo: full height
+        logoContainerW = rightSpaceW - 32;
+        logoContainerH = usableH;
+        logoCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
+        logoCenterY = logical.h / 2;
+      } else if (hasButton) {
+        // Only button: full height
+        buttonContainerW = rightSpaceW - 32;
+        buttonContainerH = usableH;
+        buttonCenterX = logical.w - rightSpaceW + (rightSpaceW / 2);
+        buttonCenterY = logical.h / 2;
+      }
     } else {
       const sideSpaceW = (logical.w - logicalFgW) / 2;
 

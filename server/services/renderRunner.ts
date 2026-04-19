@@ -1,6 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn, execSync } from 'node:child_process';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
-import { buildFfmpegCommand } from '../ffmpeg/buildCommand';
+import { buildFfmpegCommand, buildTrimCommand } from '../ffmpeg/buildCommand';
 import { RenderJobRecord } from '../types/renderJob';
 import { EncoderMode, getFfmpegPath } from './encoderConfig';
 
@@ -151,6 +151,53 @@ export const runRenderJob = (
         return;
       }
       reject(new Error(`FFmpeg exited with code ${code}. ${stderrOutput}`));
+    });
+  });
+
+  return { child, completion };
+};
+
+/**
+ * Run a trim-only job using stream copy (no re-encode).
+ * Much faster than full render since it just copies the encoded stream.
+ */
+export const runTrimJob = (
+  inputPath: string,
+  duration: number,
+  outputPath: string,
+  onProgress: (progress: RenderProgress) => void,
+): { child: ChildProcessWithoutNullStreams; completion: Promise<void> } => {
+  const args = buildTrimCommand({ inputPath, duration, outputPath });
+
+  const child = spawn(getFfmpegPath(), args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stderrOutput = '';
+
+  child.stderr.on('data', (buffer) => {
+    const line = buffer.toString();
+    stderrOutput += line;
+
+    const current = parseProgress(line);
+    if (current === null || duration <= 0) {
+      return;
+    }
+
+    const ratio = Math.max(0, Math.min(1, current / duration));
+    const normalized = Math.round(ratio * 100);
+    onProgress({ progress: normalized, mode: 'determinate' });
+  });
+
+  const completion = new Promise<void>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        onProgress({ progress: 100, mode: 'determinate' });
+        resolve();
+        return;
+      }
+      reject(new Error(`FFmpeg trim exited with code ${code}. ${stderrOutput}`));
     });
   });
 

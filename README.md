@@ -51,6 +51,56 @@ The frontend proxies `/api` requests to the backend at `http://localhost:3001`.
 npm run dev
 ```
 
+## Run with Docker
+
+This repository now includes a Docker-based deployment setup for local production-style usage.
+
+### What gets started
+
+- `frontend`: Nginx serving the built Vite app on port `8080` by default
+- `backend`: Express + FFmpeg render server on internal port `3001`
+- `render_data` volume: persisted render temp/output files at `/app/temp_superpowers/native-renders`
+
+### Start the stack
+
+```bash
+docker compose up --build
+```
+
+Open the app at:
+
+```text
+http://localhost:8080
+```
+
+### Stop the stack
+
+```bash
+docker compose down
+```
+
+### Reset persisted render data
+
+```bash
+docker compose down -v
+```
+
+### Docker environment knobs
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_PORT` | `8080` | Host port exposed by the Nginx frontend container |
+| `MAX_CONCURRENT_JOBS` | `5` | Backend render concurrency inside Docker (matches the app default) |
+| `FFMPEG_ENCODER` | `libx264` | Encoder passed to the backend container |
+
+### Notes
+
+- The Docker backend image installs system `ffmpeg` and uses `FFMPEG_BINARY_PATH=/usr/bin/ffmpeg`.
+- The frontend production build uses relative `/api` calls, so Nginx proxies API traffic to the backend container.
+- This initial Docker setup is aimed at single-instance self-hosting. The current queue and file retention model are still local-volume based, not distributed.
+- Docker build context now ignores local `.env` files by default; keep secrets out of the frontend image path.
+- This first Docker setup is CPU-oriented. If you later want `h264_nvenc`, you will need to add GPU runtime/device configuration on top of the current compose file.
+
 ## Environment Variables
 
 ### Backend (server)

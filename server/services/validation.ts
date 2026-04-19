@@ -163,6 +163,16 @@ export function validateRenderSpec(
     }
   }
 
+  // 11a. bitrate validation (if present, must be positive and finite)
+  if (s.bitrate !== undefined) {
+    if (!isFiniteNumber(s.bitrate) || s.bitrate <= 0) {
+      errors.push({
+        error: 'ValidationError',
+        message: 'bitrate must be a positive finite number (kbps) if provided',
+      });
+    }
+  }
+
   // 12. naming validation
   if (!s.naming || typeof s.naming !== 'object') {
     errors.push({

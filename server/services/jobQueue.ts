@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { RenderSpec } from '../../shared/render-contract';
 import { ensureTempRoot, cleanupJobByWorkDir, cleanupExpiredJobs, isJobExpired } from './fileStore';
-import { runRenderJob, RenderProgress, determineProgressMode } from './renderRunner';
+import { runRenderJob, runTrimJob, RenderProgress, determineProgressMode } from './renderRunner';
 import { RenderJobRecord } from '../types/renderJob';
 import { JobStore } from './jobStore';
 
@@ -250,6 +250,46 @@ export class JobQueueService {
     return job;
   }
 
+  /**
+   * Create a trim-only job that takes the output of a completed job and trims it.
+   * Uses stream copy (no re-encode) for very fast processing.
+   */
+  async createTrimJob(spec: RenderSpec, sourceJobId: string): Promise<RenderJobRecord> {
+    const sourceJob = this.jobs.get(sourceJobId);
+    if (!sourceJob) {
+      throw new Error(`Source job ${sourceJobId} not found`);
+    }
+    if (sourceJob.status !== 'completed') {
+      throw new Error(`Source job ${sourceJobId} is not completed (status: ${sourceJob.status})`);
+    }
+
+    const id = randomUUID();
+    // Create output dir inside source job's workDir (share workDir for cleanup)
+    const outputDir = path.join(sourceJob.files.workDir, 'trim-output');
+    await fs.mkdir(outputDir, { recursive: true });
+    const outputPath = path.join(outputDir, spec.outputFilename || `trim-${id}.mp4`);
+
+    const job: RenderJobRecord = {
+      id,
+      spec: { ...spec, trimFromJobId: sourceJobId },
+      files: {
+        foregroundPath: sourceJob.files.outputPath, // Use source output as input
+        outputPath,
+        workDir: sourceJob.files.workDir,
+      },
+      status: 'queued',
+      progress: 0,
+      outputFilename: spec.outputFilename,
+    };
+
+    this.jobs.set(id, job);
+    this.pending.push(id);
+
+    await this.persistAll();
+    this.schedule();
+    return job;
+  }
+
   getJob(jobId: string): RenderJobRecord | undefined {
     return this.jobs.get(jobId);
   }
@@ -355,26 +395,54 @@ export class JobQueueService {
     // Persist immediately when starting processing
     await this.persistAll();
     
-    // CRITICAL: Set progressMode IMMEDIATELY when entering processing state
-    // This prevents the ambiguous window where frontend sees progressMode: undefined
-    const progressMode = await this.determineProgressModeImpl(job);
-    job.progressMode = progressMode;
+    // Check if this is a trim-only job
+    const isTrimJob = !!job.spec.trimFromJobId;
     
-    // For indeterminate jobs, set progress to -1 immediately to signal "processing but unknown"
-    if (progressMode === 'indeterminate') {
-      job.progress = -1;
+    if (isTrimJob) {
+      // Trim jobs are always determinate (we know the target duration)
+      job.progressMode = 'determinate';
+    } else {
+      // CRITICAL: Set progressMode IMMEDIATELY when entering processing state
+      // This prevents the ambiguous window where frontend sees progressMode: undefined
+      const progressMode = await this.determineProgressModeImpl(job);
+      job.progressMode = progressMode;
+      
+      // For indeterminate jobs, set progress to -1 immediately to signal "processing but unknown"
+      if (progressMode === 'indeterminate') {
+        job.progress = -1;
+      }
     }
     
     let wasCancelling = false;
 
     try {
-      const { child, completion } = this.runRenderJobImpl(job, (renderProgress: RenderProgress) => {
-        if (!wasCancelling) {
-          job.progress = renderProgress.progress;
-          // Only update mode if it's still indeterminate (to avoid overwriting determinate)
-          // For indeterminate jobs, we keep emitting indeterminate mode
-        }
-      });
+      let child: import('node:child_process').ChildProcessWithoutNullStreams;
+      let completion: Promise<void>;
+
+      if (isTrimJob && job.spec.duration) {
+        // Run trim job (stream copy, no re-encode)
+        const result = runTrimJob(
+          job.files.foregroundPath, // This is the source output path
+          job.spec.duration,
+          job.files.outputPath,
+          (renderProgress: RenderProgress) => {
+            if (!wasCancelling) {
+              job.progress = renderProgress.progress;
+            }
+          },
+        );
+        child = result.child;
+        completion = result.completion;
+      } else {
+        // Run full render job
+        const result = this.runRenderJobImpl(job, (renderProgress: RenderProgress) => {
+          if (!wasCancelling) {
+            job.progress = renderProgress.progress;
+          }
+        });
+        child = result.child;
+        completion = result.completion;
+      }
 
       this.activeProcesses.set(job.id, child);
       await completion;

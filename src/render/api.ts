@@ -82,3 +82,27 @@ export const downloadRenderJob = async (jobId: string): Promise<Blob> => {
   }
   return response.blob();
 };
+
+/**
+ * Create a trim-only job that trims from a completed job's output (stream copy, no re-encode).
+ */
+export const createTrimJob = async (params: {
+  spec: RenderSpec;
+  sourceJobId: string;
+}): Promise<CreateJobResponse> => {
+  const response = await fetch(`${API_BASE}/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      spec: params.spec,
+      sourceJobId: params.sourceJobId,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await parseErrorResponse(response);
+    throw new Error(error.message);
+  }
+
+  return response.json();
+};

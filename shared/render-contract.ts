@@ -29,6 +29,10 @@ export interface RenderSpec {
   outputRatio: AspectRatio;
   /** Duration in seconds. Undefined means full video length. */
   duration?: number;
+  /** Bitrate in kbps. Undefined means default (6000 kbps). */
+  bitrate?: number;
+  /** If set, this job is a trim-only job: trim from the completed job's output using stream copy. */
+  trimFromJobId?: string;
   fgPosition: ForegroundPosition;
   bgType: BackgroundType;
   backgroundImageMode: BackgroundImageMode;

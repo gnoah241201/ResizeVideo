@@ -119,7 +119,11 @@ export const buildFfmpegCommand = (params: {
   }
 
   // Build encoder arguments based on selected encoder
-  // Bitrate target: 5000-7000 kbps range (avg 6M, cap 7M)
+  // Bitrate: use spec.bitrate (kbps) if provided, otherwise default 6000 kbps
+  const bitrateKbps = spec.bitrate && spec.bitrate > 0 ? spec.bitrate : 6000;
+  const bitrateStr = `${bitrateKbps}k`;
+  const maxrateStr = `${Math.round(bitrateKbps * 1.17)}k`;
+  const bufsizeStr = `${Math.round(bitrateKbps * 2.33)}k`;
   // Frame rate: 30 FPS default for all outputs
   if (encoder === 'h264_nvenc') {
     // NVIDIA NVENC encoder settings
@@ -130,9 +134,9 @@ export const buildFfmpegCommand = (params: {
       '-map', '0:a?',
       '-c:v', 'h264_nvenc',
       '-preset', 'slow',
-      '-b:v', '6M',
-      '-maxrate', '7M',
-      '-bufsize', '14M',
+      '-b:v', bitrateStr,
+      '-maxrate', maxrateStr,
+      '-bufsize', bufsizeStr,
       '-r', '30',
       '-pix_fmt', 'yuv420p',
     );
@@ -144,9 +148,9 @@ export const buildFfmpegCommand = (params: {
       '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
-      '-b:v', '6M',
-      '-maxrate', '7M',
-      '-bufsize', '14M',
+      '-b:v', bitrateStr,
+      '-maxrate', maxrateStr,
+      '-bufsize', bufsizeStr,
       '-r', '30',
       '-pix_fmt', 'yuv420p',
     );
@@ -158,4 +162,23 @@ export const buildFfmpegCommand = (params: {
 
   args.push(params.outputPath);
   return args;
+};
+
+/**
+ * Build FFmpeg args for a trim-only job (stream copy, no re-encode).
+ * This is very fast since it copies the encoded stream directly.
+ */
+export const buildTrimCommand = (params: {
+  inputPath: string;
+  duration: number;
+  outputPath: string;
+}): string[] => {
+  return [
+    '-y',
+    '-i', params.inputPath,
+    '-t', String(params.duration),
+    '-c', 'copy',
+    '-movflags', '+faststart',
+    params.outputPath,
+  ];
 };
